@@ -1,5 +1,5 @@
 import { WebSocketMessage, DatasetItem } from './types';
-import { getValidAccessToken } from './auth';
+import { getValidAccessToken, getAuthType } from './auth';
 
 const TILED_URL = process.env.NEXT_PUBLIC_TILED_URL || 'https://tiled.nsls2.bnl.gov';
 
@@ -30,6 +30,7 @@ export class TiledWebSocket {
     if (this.ws?.readyState === WebSocket.OPEN) return;
 
     const token = await getValidAccessToken();
+    const authType = getAuthType();
     const wsUrl = TILED_URL.replace('https://', 'wss://').replace('http://', 'ws://');
     let url = `${wsUrl}/api/v1/stream/single/${this.path}`;
 
@@ -37,18 +38,26 @@ export class TiledWebSocket {
       url += '?start=0';
     }
 
+    // Add auth - API keys use 'api_key' param, tokens use 'access_token'
     if (token) {
-      url += `${url.includes('?') ? '&' : '?'}access_token=${token}`;
+      const paramName = authType === 'apikey' ? 'api_key' : 'access_token';
+      const encodedToken = encodeURIComponent(token);
+      url += `${url.includes('?') ? '&' : '?'}${paramName}=${encodedToken}`;
     }
+
+    console.log('[WebSocket] Connecting to:', url.replace(/[?&](api_key|access_token)=[^&]+/, '?$1=***'));
+    console.log('[WebSocket] Auth type:', authType);
 
     this.ws = new WebSocket(url);
 
     this.ws.onopen = () => {
+      console.log('[WebSocket] Connected successfully');
       this.reconnectAttempts = 0;
       this.options.onConnect?.();
     };
 
     this.ws.onmessage = (event) => {
+      console.log('[WebSocket] Message received:', event.data.substring(0, 200));
       try {
         const msg: WebSocketMessage = JSON.parse(event.data);
 
@@ -64,11 +73,12 @@ export class TiledWebSocket {
           this.options.onMessage(item);
         }
       } catch (error) {
-        console.error('Failed to parse WebSocket message:', error);
+        console.error('[WebSocket] Failed to parse message:', error);
       }
     };
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (event) => {
+      console.log('[WebSocket] Closed:', { code: event.code, reason: event.reason, wasClean: event.wasClean });
       if (!this.isManualClose) {
         this.options.onDisconnect?.();
         this.scheduleReconnect();
@@ -76,6 +86,7 @@ export class TiledWebSocket {
     };
 
     this.ws.onerror = (error) => {
+      console.error('[WebSocket] Error:', error);
       this.options.onError?.(error);
     };
   }
