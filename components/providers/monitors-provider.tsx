@@ -9,6 +9,7 @@ interface MonitorsContextValue {
   monitors: MonitorConfig[];
   addMonitor: (path: string, label?: string) => void;
   removeMonitor: (id: string) => void;
+  reorderMonitors: (activeId: string, overId: string) => void;
 }
 
 const MonitorsContext = createContext<MonitorsContextValue | null>(null);
@@ -69,8 +70,23 @@ export function MonitorsProvider({ children }: { children: React.ReactNode }) {
     setMonitors((prev) => prev.filter((m) => m.id !== id));
   }, []);
 
+  const reorderMonitors = useCallback((activeId: string, overId: string) => {
+    setMonitors((prev) => {
+      const oldIndex = prev.findIndex((m) => m.id === activeId);
+      const newIndex = prev.findIndex((m) => m.id === overId);
+
+      if (oldIndex === -1 || newIndex === -1) return prev;
+
+      const newMonitors = [...prev];
+      const [removed] = newMonitors.splice(oldIndex, 1);
+      newMonitors.splice(newIndex, 0, removed);
+
+      return newMonitors;
+    });
+  }, []);
+
   return (
-    <MonitorsContext.Provider value={{ monitors, addMonitor, removeMonitor }}>
+    <MonitorsContext.Provider value={{ monitors, addMonitor, removeMonitor, reorderMonitors }}>
       {children}
     </MonitorsContext.Provider>
   );

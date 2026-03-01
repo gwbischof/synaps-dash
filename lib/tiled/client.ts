@@ -30,30 +30,34 @@ export async function listChildren(
 ): Promise<{ items: DatasetItem[]; hasMore: boolean; totalCount: number }> {
   const { offset = 0, limit = 20, sort = '-time_created' } = options;
 
-  const url = new URL(`${API_BASE}/search/${path}`, window.location.origin);
-  url.searchParams.set('page[offset]', offset.toString());
-  url.searchParams.set('page[limit]', limit.toString());
-  if (sort) {
-    url.searchParams.set('sort', sort);
+  // Try sort options in order of preference
+  const sortOptions = sort ? [sort, '-scan_id', ''] : [''];
+  let response: Response | null = null;
+  let usedSort = '';
+
+  for (const sortOption of sortOptions) {
+    const url = new URL(`${API_BASE}/search/${path}`, window.location.origin);
+    url.searchParams.set('page[offset]', offset.toString());
+    url.searchParams.set('page[limit]', limit.toString());
+    if (sortOption) {
+      url.searchParams.set('sort', sortOption);
+    }
+
+    response = await fetchWithAuth(url.toString());
+
+    if (response.ok) {
+      usedSort = sortOption;
+      break;
+    }
   }
 
-  let response = await fetchWithAuth(url.toString());
-
-  // If sort fails (some catalogs don't support it), retry without sort
-  if (!response.ok && sort) {
-    const urlWithoutSort = new URL(`${API_BASE}/search/${path}`, window.location.origin);
-    urlWithoutSort.searchParams.set('page[offset]', offset.toString());
-    urlWithoutSort.searchParams.set('page[limit]', limit.toString());
-    response = await fetchWithAuth(urlWithoutSort.toString());
-  }
-
-  if (!response.ok) {
-    throw new Error(`Failed to list children: ${response.status} ${response.statusText}`);
+  if (!response || !response.ok) {
+    throw new Error(`Failed to list children: ${response?.status} ${response?.statusText}`);
   }
 
   const data: TiledSearchResponse<TiledNode> = await response.json();
 
-  const items: DatasetItem[] = data.data.map((node) => ({
+  let items: DatasetItem[] = data.data.map((node) => ({
     id: node.id,
     path: `${path}/${node.id}`,
     metadata: node.attributes.metadata,
@@ -61,6 +65,11 @@ export async function listChildren(
     shape: node.attributes.structure?.shape,
     timeCreated: node.attributes.metadata.time_created as string | undefined,
   }));
+
+  // If no sort was used, reverse to show newest first (assuming server returns oldest first)
+  if (!usedSort && offset === 0) {
+    items = items.reverse();
+  }
 
   return {
     items,

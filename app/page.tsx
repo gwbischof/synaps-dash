@@ -3,25 +3,54 @@
 import { useState, useEffect } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { Plus } from 'lucide-react';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+  DragStartEvent,
+  DragOverlay,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  horizontalListSortingStrategy,
+} from '@dnd-kit/sortable';
 import { Button } from '@/components/ui/button';
 import { Header } from '@/components/layout/header';
 import { ParticleBeam } from '@/components/visualizations/particle-beam';
 import { EmptyState } from '@/components/monitor/empty-state';
 import { MonitorColumn } from '@/components/monitor/monitor-column';
+import { SortableMonitorColumn } from '@/components/monitor/sortable-monitor-column';
 import { AddMonitorModal } from '@/components/monitor/add-monitor-modal';
 import { DetailPanel } from '@/components/detail/detail-panel';
 import { useMonitors } from '@/components/providers/monitors-provider';
 import { useAuth } from '@/components/providers/auth-provider';
-import { DatasetItem } from '@/lib/tiled/types';
+import { DatasetItem, MonitorConfig } from '@/lib/tiled/types';
 import { useRouter } from 'next/navigation';
 
 export default function DashboardPage() {
   const router = useRouter();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const { monitors, addMonitor, removeMonitor } = useMonitors();
+  const { monitors, addMonitor, removeMonitor, reorderMonitors } = useMonitors();
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<DatasetItem | null>(null);
   const [anyConnected, setAnyConnected] = useState(false);
+  const [activeMonitor, setActiveMonitor] = useState<MonitorConfig | null>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
 
   // Redirect to login if not authenticated
   useEffect(() => {
@@ -34,6 +63,21 @@ export default function DashboardPage() {
   useEffect(() => {
     setAnyConnected(monitors.length > 0);
   }, [monitors]);
+
+  const handleDragStart = (event: DragStartEvent) => {
+    const { active } = event;
+    const monitor = monitors.find((m) => m.id === active.id);
+    setActiveMonitor(monitor || null);
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveMonitor(null);
+
+    if (over && active.id !== over.id) {
+      reorderMonitors(active.id as string, over.id as string);
+    }
+  };
 
   if (authLoading) {
     return (
@@ -61,29 +105,56 @@ export default function DashboardPage() {
           <EmptyState onAddMonitor={() => setIsAddModalOpen(true)} />
         ) : (
           <div className="p-6 h-full">
-            <div className="flex gap-4 overflow-x-auto h-[calc(100vh-120px)]">
-              <AnimatePresence mode="popLayout">
-                {monitors.map((monitor) => (
-                  <MonitorColumn
-                    key={monitor.id}
-                    id={monitor.id}
-                    path={monitor.path}
-                    label={monitor.label}
-                    onRemove={() => removeMonitor(monitor.id)}
-                    onSelectItem={setSelectedItem}
-                  />
-                ))}
-              </AnimatePresence>
-
-              {/* Add Column Button */}
-              <Button
-                onClick={() => setIsAddModalOpen(true)}
-                variant="outline"
-                className="flex-shrink-0 h-full w-16 border-dashed border-border-subtle hover:border-beam-cyan hover:bg-beam-cyan/5 transition-colors"
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={monitors.map((m) => m.id)}
+                strategy={horizontalListSortingStrategy}
               >
-                <Plus className="h-6 w-6 text-text-dim" />
-              </Button>
-            </div>
+                <div className="flex gap-4 overflow-x-auto h-[calc(100vh-120px)]">
+                  <AnimatePresence mode="popLayout">
+                    {monitors.map((monitor) => (
+                      <SortableMonitorColumn
+                        key={monitor.id}
+                        id={monitor.id}
+                        path={monitor.path}
+                        label={monitor.label}
+                        onRemove={() => removeMonitor(monitor.id)}
+                        onSelectItem={setSelectedItem}
+                      />
+                    ))}
+                  </AnimatePresence>
+
+                  {/* Add Column Button */}
+                  <Button
+                    onClick={() => setIsAddModalOpen(true)}
+                    variant="outline"
+                    className="flex-shrink-0 h-full w-16 border-dashed border-border-subtle hover:border-beam-cyan hover:bg-beam-cyan/5 transition-colors"
+                  >
+                    <Plus className="h-6 w-6 text-text-dim" />
+                  </Button>
+                </div>
+              </SortableContext>
+
+              {/* Drag Overlay */}
+              <DragOverlay>
+                {activeMonitor ? (
+                  <div className="opacity-80">
+                    <MonitorColumn
+                      id={activeMonitor.id}
+                      path={activeMonitor.path}
+                      label={activeMonitor.label}
+                      onRemove={() => {}}
+                      onSelectItem={() => {}}
+                    />
+                  </div>
+                ) : null}
+              </DragOverlay>
+            </DndContext>
           </div>
         )}
       </main>
