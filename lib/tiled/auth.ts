@@ -3,6 +3,10 @@ import { TokenResponse, TiledUser } from './types';
 const TOKEN_KEY = 'tiled_access_token';
 const REFRESH_TOKEN_KEY = 'tiled_refresh_token';
 const TOKEN_EXPIRY_KEY = 'tiled_token_expiry';
+const API_KEY_KEY = 'tiled_api_key';
+const AUTH_TYPE_KEY = 'tiled_auth_type';
+
+type AuthType = 'token' | 'apikey';
 
 export function getStoredTokens(): { accessToken: string | null; refreshToken: string | null; expiresAt: number | null } {
   if (typeof window === 'undefined') {
@@ -16,6 +20,16 @@ export function getStoredTokens(): { accessToken: string | null; refreshToken: s
   };
 }
 
+export function getStoredApiKey(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem(API_KEY_KEY);
+}
+
+export function getAuthType(): AuthType | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem(AUTH_TYPE_KEY) as AuthType | null;
+}
+
 export function storeTokens(response: TokenResponse): void {
   if (typeof window === 'undefined') return;
 
@@ -23,6 +37,18 @@ export function storeTokens(response: TokenResponse): void {
   localStorage.setItem(TOKEN_KEY, response.access_token);
   localStorage.setItem(REFRESH_TOKEN_KEY, response.refresh_token);
   localStorage.setItem(TOKEN_EXPIRY_KEY, expiresAt.toString());
+  localStorage.setItem(AUTH_TYPE_KEY, 'token');
+  localStorage.removeItem(API_KEY_KEY);
+}
+
+export function storeApiKey(apiKey: string): void {
+  if (typeof window === 'undefined') return;
+
+  localStorage.setItem(API_KEY_KEY, apiKey);
+  localStorage.setItem(AUTH_TYPE_KEY, 'apikey');
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
+  localStorage.removeItem(TOKEN_EXPIRY_KEY);
 }
 
 export function clearTokens(): void {
@@ -31,6 +57,8 @@ export function clearTokens(): void {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem(TOKEN_EXPIRY_KEY);
+  localStorage.removeItem(API_KEY_KEY);
+  localStorage.removeItem(AUTH_TYPE_KEY);
 }
 
 export function isTokenExpired(): boolean {
@@ -58,6 +86,24 @@ export async function loginWithPassword(username: string, password: string): Pro
 
   storeTokens(data);
   return data;
+}
+
+export async function validateApiKey(apiKey: string): Promise<TiledUser> {
+  // Validate API key by calling whoami
+  const response = await fetch('/api/auth/whoami', {
+    headers: {
+      'Authorization': `Apikey ${apiKey}`,
+    },
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || 'Invalid API key');
+  }
+
+  const user = await response.json();
+  storeApiKey(apiKey);
+  return user;
 }
 
 export async function refreshAccessToken(): Promise<TokenResponse | null> {
@@ -88,12 +134,17 @@ export async function refreshAccessToken(): Promise<TokenResponse | null> {
   }
 }
 
-export async function getCurrentUser(accessToken: string): Promise<TiledUser | null> {
+export async function getCurrentUser(accessTokenOrApiKey: string): Promise<TiledUser | null> {
   try {
+    const authType = getAuthType();
+    const authHeader = authType === 'apikey'
+      ? `Apikey ${accessTokenOrApiKey}`
+      : `Bearer ${accessTokenOrApiKey}`;
+
     // Use local API route to avoid CORS issues
     const response = await fetch('/api/auth/whoami', {
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
+        'Authorization': authHeader,
       },
     });
 
@@ -113,6 +164,14 @@ export async function logout(): Promise<void> {
 }
 
 export async function getValidAccessToken(): Promise<string | null> {
+  const authType = getAuthType();
+
+  // If using API key, return it directly (they don't expire)
+  if (authType === 'apikey') {
+    return getStoredApiKey();
+  }
+
+  // Token-based auth
   const { accessToken } = getStoredTokens();
 
   if (!accessToken) return null;
@@ -123,4 +182,16 @@ export async function getValidAccessToken(): Promise<string | null> {
   }
 
   return accessToken;
+}
+
+export function getAuthHeader(): string | null {
+  const authType = getAuthType();
+
+  if (authType === 'apikey') {
+    const apiKey = getStoredApiKey();
+    return apiKey ? `Apikey ${apiKey}` : null;
+  }
+
+  const { accessToken } = getStoredTokens();
+  return accessToken ? `Bearer ${accessToken}` : null;
 }

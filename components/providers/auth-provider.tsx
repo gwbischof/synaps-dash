@@ -4,7 +4,10 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import { TiledUser } from '@/lib/tiled/types';
 import {
   getStoredTokens,
+  getStoredApiKey,
+  getAuthType,
   loginWithPassword,
+  validateApiKey,
   logout as tiledLogout,
   getCurrentUser,
   refreshAccessToken,
@@ -20,6 +23,7 @@ interface AuthState {
 
 interface AuthContextValue extends AuthState {
   login: (username: string, password: string) => Promise<void>;
+  loginWithApiKey: (apiKey: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -34,6 +38,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   });
 
   const checkAuth = useCallback(async () => {
+    const authType = getAuthType();
+
+    // Check API key auth first
+    if (authType === 'apikey') {
+      const apiKey = getStoredApiKey();
+      if (apiKey) {
+        const user = await getCurrentUser(apiKey);
+        setState({
+          user,
+          isAuthenticated: !!user,
+          isLoading: false,
+          accessToken: apiKey,
+        });
+        return;
+      }
+    }
+
+    // Token-based auth
     const { accessToken } = getStoredTokens();
 
     if (!accessToken) {
@@ -85,9 +107,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     checkAuth();
   }, [checkAuth]);
 
-  // Schedule token refresh
+  // Schedule token refresh (only for token auth, not API keys)
   useEffect(() => {
     if (!state.isAuthenticated) return;
+    if (getAuthType() === 'apikey') return; // API keys don't expire
 
     const { expiresAt } = getStoredTokens();
     if (!expiresAt) return;
@@ -127,6 +150,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const loginWithApiKeyFn = async (apiKey: string) => {
+    setState((prev) => ({ ...prev, isLoading: true }));
+
+    try {
+      const user = await validateApiKey(apiKey);
+
+      setState({
+        user,
+        isAuthenticated: true,
+        isLoading: false,
+        accessToken: apiKey,
+      });
+    } catch (error) {
+      setState({
+        user: null,
+        isAuthenticated: false,
+        isLoading: false,
+        accessToken: null,
+      });
+      throw error;
+    }
+  };
+
   const logout = async () => {
     await tiledLogout();
     setState({
@@ -138,7 +184,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ ...state, login, logout }}>
+    <AuthContext.Provider value={{ ...state, login, loginWithApiKey: loginWithApiKeyFn, logout }}>
       {children}
     </AuthContext.Provider>
   );

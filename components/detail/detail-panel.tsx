@@ -103,6 +103,14 @@ function MetadataRow({
   );
 }
 
+function formatId(id: string): string {
+  // If it looks like a UUID, show only the first section
+  if (id.includes('-') && id.length > 20) {
+    return id.split('-')[0];
+  }
+  return id;
+}
+
 export function DetailPanel({ item, onClose }: DetailPanelProps) {
   if (!item) return null;
 
@@ -134,7 +142,7 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
       <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle">
         <div>
           <h2 className="font-display text-lg text-beam-cyan tracking-wider">
-            {metadata.scan_id ? `SCAN #${metadata.scan_id}` : item.id}
+            {metadata.scan_id ? `SCAN #${metadata.scan_id}` : formatId(item.id)}
           </h2>
           <p className="text-xs text-text-dim font-mono">{item.path}</p>
         </div>

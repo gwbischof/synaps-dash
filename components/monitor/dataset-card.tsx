@@ -11,6 +11,14 @@ interface DatasetCardProps {
   onClick: () => void;
 }
 
+function formatId(id: string): string {
+  // If it looks like a UUID, show only the first section
+  if (id.includes('-') && id.length > 20) {
+    return id.split('-')[0];
+  }
+  return id;
+}
+
 function formatRelativeTime(timestamp: string | undefined): string {
   if (!timestamp) return '';
 
@@ -119,7 +127,7 @@ export function DatasetCard({ item, onClick }: DatasetCardProps) {
           {/* Scan ID */}
           <div className="flex items-center gap-2">
             <span className="font-display text-sm text-text-primary tracking-wide">
-              {scanId ? `#${scanId}` : item.id}
+              {scanId ? `#${scanId}` : formatId(item.id)}
             </span>
             {item.isNew && (
               <Badge variant="outline" className="text-[10px] py-0 px-1 text-beam-cyan border-beam-cyan">
@@ -155,15 +163,24 @@ export function DatasetCard({ item, onClick }: DatasetCardProps) {
             </div>
           )}
 
+          {/* Step size */}
+          {metadata.step_size && (
+            <div className="text-xs text-text-dim">
+              {metadata.step_size} μm/px
+            </div>
+          )}
+
           {/* Sample name */}
           {sample && (
             <div className="text-xs text-text-dim truncate">{sample}</div>
           )}
 
           {/* Timestamp */}
-          <div className="text-xs text-text-dim">
-            {formatRelativeTime(item.timeCreated)}
-          </div>
+          {item.timeCreated && (
+            <div className="text-xs text-text-dim">
+              {formatRelativeTime(item.timeCreated)}
+            </div>
+          )}
         </div>
       </div>
     </motion.div>

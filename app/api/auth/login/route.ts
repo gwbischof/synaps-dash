@@ -28,6 +28,17 @@ export async function POST(request: NextRequest) {
 
         if (response.ok) {
           const data = await response.json();
+          // Debug: Log the token to understand scopes issue
+          console.log('[Login] Provider:', prov);
+          console.log('[Login] Token response keys:', Object.keys(data));
+          if (data.access_token) {
+            // Decode JWT to see scopes
+            const parts = data.access_token.split('.');
+            if (parts.length === 3) {
+              const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+              console.log('[Login] Token payload:', JSON.stringify(payload, null, 2));
+            }
+          }
           return NextResponse.json(data);
         }
 

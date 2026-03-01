@@ -12,6 +12,8 @@ export async function GET(
     const searchParams = request.nextUrl.searchParams.toString();
     const url = `${TILED_URL}/api/v1/${tiledPath}${searchParams ? `?${searchParams}` : ''}`;
 
+    console.log('[Tiled Proxy] Request:', { tiledPath, searchParams, url });
+
     const authHeader = request.headers.get('Authorization');
 
     const headers: HeadersInit = {};
@@ -21,11 +23,14 @@ export async function GET(
 
     const response = await fetch(url, { headers });
 
+    console.log('[Tiled Proxy] Response:', { status: response.status, ok: response.ok });
+
     // Get the content type to handle different response types
     const contentType = response.headers.get('Content-Type') || '';
 
     if (!response.ok) {
       const error = await response.text();
+      console.log('[Tiled Proxy] Error response:', error);
       return NextResponse.json(
         { error: error || `Request failed: ${response.status}` },
         { status: response.status }
@@ -68,6 +73,11 @@ export async function GET(
     });
   } catch (error) {
     console.error('Tiled proxy error:', error);
+    console.error('Error details:', {
+      name: error instanceof Error ? error.name : 'unknown',
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Request failed' },
       { status: 500 }

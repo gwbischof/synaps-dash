@@ -2,7 +2,7 @@
 
 import { useRef, useCallback, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Wifi, WifiOff, ChevronUp, Loader2 } from 'lucide-react';
+import { X, Wifi, WifiOff, Loader2, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { DatasetCard } from './dataset-card';
@@ -25,9 +25,10 @@ export function MonitorColumn({
   onRemove,
   onSelectItem,
 }: MonitorColumnProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const [showBackToTop, setShowBackToTop] = useState(false);
+  const [scrollProgress, setScrollProgress] = useState(0);
 
   const {
     items,
@@ -64,11 +65,17 @@ export function MonitorColumn({
   // Handle scroll for back to top button
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const target = e.target as HTMLDivElement;
-    setShowBackToTop(target.scrollTop > 300);
+    const scrolled = target.scrollTop > 150;
+    setShowBackToTop(scrolled);
+
+    // Calculate scroll progress for the beam effect
+    const maxScroll = target.scrollHeight - target.clientHeight;
+    const progress = maxScroll > 0 ? Math.min(target.scrollTop / maxScroll, 1) : 0;
+    setScrollProgress(progress);
   }, []);
 
   const scrollToTop = useCallback(() => {
-    scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    viewportRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
   return (
@@ -77,10 +84,10 @@ export function MonitorColumn({
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: -20 }}
-      className="flex flex-col w-80 h-full bg-chamber/50 border border-border-subtle rounded-lg backdrop-blur-sm"
+      className="flex flex-col w-80 h-full flex-shrink-0 bg-chamber/50 border border-border-subtle rounded-lg backdrop-blur-sm overflow-hidden"
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle relative">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h3 className="font-display text-sm tracking-wider text-text-primary truncate">
@@ -104,8 +111,58 @@ export function MonitorColumn({
         </Button>
       </div>
 
+      {/* Beam Return - Scroll to Top Indicator */}
+      <AnimatePresence>
+        {showBackToTop && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+            className="overflow-hidden"
+          >
+            <button
+              onClick={scrollToTop}
+              className="group w-full relative overflow-hidden"
+            >
+              {/* Animated beam background */}
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-beam-cyan/20 to-transparent beam-sweep" />
+
+              {/* Main content */}
+              <div className="relative flex items-center justify-center gap-2 px-4 py-2 bg-beam-cyan/5 border-b border-beam-cyan/30 hover:bg-beam-cyan/10 transition-colors">
+                {/* Left beam line */}
+                <div className="flex-1 h-px bg-gradient-to-r from-transparent via-beam-cyan/50 to-beam-cyan" />
+
+                {/* Center icon with glow */}
+                <div className="relative">
+                  <div className="absolute inset-0 bg-beam-cyan/40 blur-md rounded-full scale-150" />
+                  <div className="relative flex items-center gap-1.5 px-3 py-1 bg-beam-cyan/20 rounded-full border border-beam-cyan/40 group-hover:border-beam-cyan group-hover:bg-beam-cyan/30 transition-all">
+                    <Zap className="h-3 w-3 text-beam-cyan" />
+                    <span className="text-[10px] font-display tracking-widest text-beam-cyan uppercase">
+                      Return to top
+                    </span>
+                  </div>
+                </div>
+
+                {/* Right beam line */}
+                <div className="flex-1 h-px bg-gradient-to-l from-transparent via-beam-cyan/50 to-beam-cyan" />
+              </div>
+
+              {/* Scroll progress indicator */}
+              <div className="h-0.5 bg-void/50">
+                <motion.div
+                  className="h-full bg-gradient-to-r from-beam-cyan via-beam-cyan-bright to-beam-cyan"
+                  style={{ width: `${scrollProgress * 100}%` }}
+                  transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                />
+              </div>
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Content */}
-      <div className="flex-1 relative overflow-hidden">
+      <div className="flex-1 relative min-h-0 overflow-hidden">
         {error ? (
           <div className="flex items-center justify-center h-full p-4">
             <div className="text-center">
@@ -129,7 +186,7 @@ export function MonitorColumn({
         ) : (
           <ScrollArea
             className="h-full"
-            ref={scrollRef}
+            viewportRef={viewportRef}
             onScrollCapture={handleScroll}
           >
             <div className="p-3 space-y-3">
@@ -163,29 +220,6 @@ export function MonitorColumn({
             </div>
           </ScrollArea>
         )}
-
-        {/* Back to top button */}
-        <AnimatePresence>
-          {showBackToTop && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 10 }}
-              className="absolute bottom-4 right-4"
-            >
-              <Button
-                size="icon"
-                onClick={scrollToTop}
-                className={cn(
-                  'h-8 w-8 rounded-full bg-beam-cyan text-void',
-                  'hover:bg-beam-cyan-bright shadow-lg shadow-beam-cyan/20'
-                )}
-              >
-                <ChevronUp className="h-4 w-4" />
-              </Button>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
 
       {/* Footer stats */}

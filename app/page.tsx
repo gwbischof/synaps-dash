@@ -60,8 +60,8 @@ export default function DashboardPage() {
         {monitors.length === 0 ? (
           <EmptyState onAddMonitor={() => setIsAddModalOpen(true)} />
         ) : (
-          <div className="p-6">
-            <div className="flex gap-4 overflow-x-auto pb-4">
+          <div className="p-6 h-full">
+            <div className="flex gap-4 overflow-x-auto h-[calc(100vh-120px)]">
               <AnimatePresence mode="popLayout">
                 {monitors.map((monitor) => (
                   <MonitorColumn
@@ -79,7 +79,7 @@ export default function DashboardPage() {
               <Button
                 onClick={() => setIsAddModalOpen(true)}
                 variant="outline"
-                className="flex-shrink-0 h-auto min-h-[200px] w-16 border-dashed border-border-subtle hover:border-beam-cyan hover:bg-beam-cyan/5 transition-colors"
+                className="flex-shrink-0 h-full w-16 border-dashed border-border-subtle hover:border-beam-cyan hover:bg-beam-cyan/5 transition-colors"
               >
                 <Plus className="h-6 w-6 text-text-dim" />
               </Button>
@@ -98,17 +98,10 @@ export default function DashboardPage() {
       {/* Detail Panel */}
       <AnimatePresence>
         {selectedItem && (
-          <>
-            {/* Backdrop */}
-            <div
-              className="fixed inset-0 bg-void/50 backdrop-blur-sm z-40"
-              onClick={() => setSelectedItem(null)}
-            />
-            <DetailPanel
-              item={selectedItem}
-              onClose={() => setSelectedItem(null)}
-            />
-          </>
+          <DetailPanel
+            item={selectedItem}
+            onClose={() => setSelectedItem(null)}
+          />
         )}
       </AnimatePresence>
     </div>

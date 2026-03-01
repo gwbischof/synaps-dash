@@ -1,5 +1,5 @@
 import { TiledSearchResponse, TiledNode, DatasetItem } from './types';
-import { getValidAccessToken } from './auth';
+import { getAuthHeader } from './auth';
 
 // Use local API proxy to avoid CORS issues
 const API_BASE = '/api/tiled';
@@ -8,11 +8,11 @@ const API_BASE = '/api/tiled';
 const TILED_URL = process.env.NEXT_PUBLIC_TILED_URL || 'https://tiled.nsls2.bnl.gov';
 
 async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
-  const token = await getValidAccessToken();
+  const authHeader = getAuthHeader();
 
   const headers = new Headers(options.headers);
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
+  if (authHeader) {
+    headers.set('Authorization', authHeader);
   }
 
   return fetch(url, { ...options, headers });
@@ -33,9 +33,19 @@ export async function listChildren(
   const url = new URL(`${API_BASE}/search/${path}`, window.location.origin);
   url.searchParams.set('page[offset]', offset.toString());
   url.searchParams.set('page[limit]', limit.toString());
-  url.searchParams.set('sort', sort);
+  if (sort) {
+    url.searchParams.set('sort', sort);
+  }
 
-  const response = await fetchWithAuth(url.toString());
+  let response = await fetchWithAuth(url.toString());
+
+  // If sort fails (some catalogs don't support it), retry without sort
+  if (!response.ok && sort) {
+    const urlWithoutSort = new URL(`${API_BASE}/search/${path}`, window.location.origin);
+    urlWithoutSort.searchParams.set('page[offset]', offset.toString());
+    urlWithoutSort.searchParams.set('page[limit]', limit.toString());
+    response = await fetchWithAuth(urlWithoutSort.toString());
+  }
 
   if (!response.ok) {
     throw new Error(`Failed to list children: ${response.status} ${response.statusText}`);
@@ -85,11 +95,11 @@ export function getArrayFullUrl(path: string, format: string = 'image/png'): str
 
 export async function fetchThumbnail(path: string): Promise<string | null> {
   try {
-    const token = await getValidAccessToken();
+    const authHeader = getAuthHeader();
     const url = getThumbnailUrl(path);
 
     const response = await fetch(url, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      headers: authHeader ? { Authorization: authHeader } : {},
     });
 
     if (!response.ok) return null;
@@ -102,11 +112,11 @@ export async function fetchThumbnail(path: string): Promise<string | null> {
 }
 
 export async function downloadSvg(path: string, filename: string): Promise<void> {
-  const token = await getValidAccessToken();
+  const authHeader = getAuthHeader();
   const url = getSvgUrl(path);
 
   const response = await fetch(url, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    headers: authHeader ? { Authorization: authHeader } : {},
   });
 
   if (!response.ok) {
