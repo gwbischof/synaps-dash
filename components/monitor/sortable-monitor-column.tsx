@@ -43,10 +43,10 @@ export function SortableMonitorColumn({
       style={style}
       className={cn(
         'relative flex-shrink-0',
-        isDragging && 'opacity-50'
+        isDragging && 'opacity-60'
       )}
     >
-      {/* Drag handle overlay at the top - leaves space on right for close button */}
+      {/* Drag handle */}
       <div
         {...attributes}
         {...listeners}
@@ -54,12 +54,12 @@ export function SortableMonitorColumn({
           'absolute top-0 left-0 right-10 h-12 z-10 cursor-grab active:cursor-grabbing',
           'flex items-center justify-center',
           'opacity-0 hover:opacity-100 transition-opacity',
-          'bg-gradient-to-b from-beam-cyan/10 to-transparent'
+          'bg-gradient-to-b from-surface-raised/80 to-transparent rounded-t-2xl'
         )}
       >
-        <div className="flex items-center gap-1 px-2 py-1 rounded bg-beam-cyan/20 border border-beam-cyan/30">
-          <GripVertical className="h-3 w-3 text-beam-cyan" />
-          <span className="text-[10px] font-mono text-beam-cyan uppercase tracking-wider">
+        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-overlay border border-border-medium shadow-lg">
+          <GripVertical className="h-3 w-3 text-beam" />
+          <span className="text-[10px] font-medium text-text-secondary">
             Drag to reorder
           </span>
         </div>

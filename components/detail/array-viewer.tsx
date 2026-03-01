@@ -22,17 +22,11 @@ export function ArrayViewer({ path }: ArrayViewerProps) {
 
       try {
         const url = await fetchThumbnail(path);
-        if (!cancelled) {
-          setImageUrl(url);
-        }
+        if (!cancelled) setImageUrl(url);
       } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load image');
-        }
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load image');
       } finally {
-        if (!cancelled) {
-          setIsLoading(false);
-        }
+        if (!cancelled) setIsLoading(false);
       }
     };
 
@@ -40,26 +34,27 @@ export function ArrayViewer({ path }: ArrayViewerProps) {
 
     return () => {
       cancelled = true;
-      if (imageUrl) {
-        URL.revokeObjectURL(imageUrl);
-      }
+      if (imageUrl) URL.revokeObjectURL(imageUrl);
     };
   }, [path]);
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-64 bg-chamber rounded-lg border border-border-subtle">
-        <Loader2 className="h-8 w-8 text-beam-cyan animate-spin" />
+      <div className="flex items-center justify-center h-64 rounded-xl bg-surface-raised border border-border-subtle">
+        <div className="text-center">
+          <Loader2 className="h-6 w-6 text-beam animate-spin mx-auto mb-2" />
+          <p className="text-xs text-text-tertiary">Loading image...</p>
+        </div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-64 bg-chamber rounded-lg border border-border-subtle">
-        <div className="text-center">
-          <p className="text-status-error text-sm mb-1">Failed to load image</p>
-          <p className="text-text-dim text-xs">{error}</p>
+      <div className="flex items-center justify-center h-64 rounded-xl bg-surface-raised border border-border-subtle">
+        <div className="text-center p-6">
+          <p className="text-error text-sm font-medium mb-1">Failed to load image</p>
+          <p className="text-text-tertiary text-xs">{error}</p>
         </div>
       </div>
     );
@@ -67,21 +62,21 @@ export function ArrayViewer({ path }: ArrayViewerProps) {
 
   if (!imageUrl) {
     return (
-      <div className="flex items-center justify-center h-64 bg-chamber rounded-lg border border-border-subtle">
-        <p className="text-text-dim text-sm">No image available</p>
+      <div className="flex items-center justify-center h-64 rounded-xl bg-surface-raised border border-border-subtle">
+        <p className="text-text-tertiary text-sm">No image available</p>
       </div>
     );
   }
 
   return (
-    <div className="relative rounded-lg overflow-hidden border border-border-subtle bg-chamber">
+    <div className="relative rounded-xl overflow-hidden border border-border-subtle bg-surface-ground">
       <img
         src={imageUrl}
         alt="Array visualization"
         className="w-full h-auto max-h-96 object-contain"
       />
-      {/* Vignette overlay */}
-      <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-chamber/50 via-transparent to-transparent" />
+      {/* Subtle gradient overlay */}
+      <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-surface-ground/30 via-transparent to-transparent" />
     </div>
   );
 }

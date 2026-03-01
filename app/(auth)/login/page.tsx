@@ -5,8 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/auth-provider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Key, User } from 'lucide-react';
+import { Key, User, ArrowRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type AuthMode = 'password' | 'apikey';
@@ -23,7 +22,6 @@ export default function LoginPage() {
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-
     try {
       await login(username, password);
       router.push('/');
@@ -35,7 +33,6 @@ export default function LoginPage() {
   const handleApiKeySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-
     try {
       await loginWithApiKey(apiKey);
       router.push('/');
@@ -45,27 +42,50 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <Card className="w-full max-w-md bg-chamber border-border-subtle">
-        <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-display text-beam-cyan tracking-wider">
-            SYNAPS MONITOR
-          </CardTitle>
-          <CardDescription className="text-text-secondary">
-            Sign in to access the pipeline dashboard
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Mode selector */}
-          <div className="flex gap-2 p-1 bg-elevated rounded-lg">
+    <div className="min-h-screen flex items-center justify-center p-6">
+      <div className="w-full max-w-sm">
+        {/* Logo */}
+        <div className="flex items-center justify-center gap-3 mb-10">
+          <div className="relative w-10 h-10 flex items-center justify-center">
+            <div className="absolute inset-0 rounded-xl bg-gradient-to-br from-beam/20 to-cell/10 animate-breathe" />
+            <svg
+              viewBox="0 0 24 24"
+              className="w-6 h-6 text-beam relative"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            >
+              <circle cx="12" cy="12" r="3" />
+              <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+              <path d="M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" opacity="0.5" />
+            </svg>
+          </div>
+          <span className="text-xl font-semibold text-text-primary tracking-tight">
+            SYNAPS
+          </span>
+        </div>
+
+        {/* Card */}
+        <div className="glass-card rounded-2xl p-6">
+          <div className="text-center mb-6">
+            <h1 className="text-lg font-semibold text-text-primary mb-1">
+              Sign in to continue
+            </h1>
+            <p className="text-sm text-text-secondary">
+              Access the pipeline monitoring dashboard
+            </p>
+          </div>
+
+          {/* Mode Toggle */}
+          <div className="flex p-1 mb-6 rounded-lg bg-surface-ground border border-border-subtle">
             <button
               type="button"
               onClick={() => setMode('password')}
               className={cn(
-                'flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-sm transition-all',
+                'flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-all',
                 mode === 'password'
-                  ? 'bg-beam-cyan/20 text-beam-cyan'
-                  : 'text-text-secondary hover:text-text-primary'
+                  ? 'bg-surface-raised text-text-primary shadow-sm'
+                  : 'text-text-tertiary hover:text-text-secondary'
               )}
             >
               <User className="w-4 h-4" />
@@ -75,10 +95,10 @@ export default function LoginPage() {
               type="button"
               onClick={() => setMode('apikey')}
               className={cn(
-                'flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-sm transition-all',
+                'flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-all',
                 mode === 'apikey'
-                  ? 'bg-xray-purple/20 text-xray-purple'
-                  : 'text-text-secondary hover:text-text-primary'
+                  ? 'bg-surface-raised text-text-primary shadow-sm'
+                  : 'text-text-tertiary hover:text-text-secondary'
               )}
             >
               <Key className="w-4 h-4" />
@@ -88,37 +108,31 @@ export default function LoginPage() {
 
           {mode === 'password' ? (
             <form onSubmit={handlePasswordSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <label htmlFor="username" className="text-sm text-text-secondary">
-                  Username
-                </label>
+              <div className="space-y-1.5">
+                <label className="data-label">Username</label>
                 <Input
-                  id="username"
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="Enter your username"
-                  className="bg-elevated border-border-subtle focus:border-beam-cyan"
+                  placeholder="Enter username"
+                  className="bg-surface-ground border-border-subtle focus:border-beam h-10"
                   required
                 />
               </div>
-              <div className="space-y-2">
-                <label htmlFor="password" className="text-sm text-text-secondary">
-                  Password
-                </label>
+              <div className="space-y-1.5">
+                <label className="data-label">Password</label>
                 <Input
-                  id="password"
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter your password"
-                  className="bg-elevated border-border-subtle focus:border-beam-cyan"
+                  placeholder="Enter password"
+                  className="bg-surface-ground border-border-subtle focus:border-beam h-10"
                   required
                 />
               </div>
 
               {error && (
-                <div className="text-sm text-status-error bg-status-error/10 p-3 rounded border border-status-error/20">
+                <div className="text-sm text-error bg-error/10 px-3 py-2 rounded-lg border border-error/20">
                   {error}
                 </div>
               )}
@@ -126,34 +140,40 @@ export default function LoginPage() {
               <Button
                 type="submit"
                 disabled={isLoading}
-                className="w-full bg-beam-cyan text-void hover:bg-beam-cyan-bright font-display tracking-wider"
+                className="w-full h-10 bg-beam text-surface-ground hover:bg-beam/90 font-medium rounded-lg gap-2 beam-caustic"
               >
-                {isLoading ? 'AUTHENTICATING...' : 'SIGN IN'}
+                {isLoading ? (
+                  <span className="animate-pulse-soft">Signing in...</span>
+                ) : (
+                  <>
+                    Sign In
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
               </Button>
             </form>
           ) : (
             <form onSubmit={handleApiKeySubmit} className="space-y-4">
-              <div className="space-y-2">
-                <label htmlFor="apikey" className="text-sm text-text-secondary">
-                  API Key
-                </label>
+              <div className="space-y-1.5">
+                <label className="data-label">API Key</label>
                 <Input
-                  id="apikey"
                   type="password"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                   placeholder="Enter your Tiled API key"
-                  className="bg-elevated border-border-subtle focus:border-xray-purple font-mono text-sm"
+                  className="bg-surface-ground border-border-subtle focus:border-cell font-mono text-sm h-10"
                   required
                 />
-                <p className="text-xs text-text-dim">
-                  Generate an API key from the Tiled web UI or using{' '}
-                  <code className="bg-elevated px-1 rounded">tiled profile api-key create</code>
+                <p className="text-[11px] text-text-tertiary mt-2">
+                  Generate a key with{' '}
+                  <code className="text-cell bg-cell/10 px-1.5 py-0.5 rounded">
+                    tiled profile api-key create
+                  </code>
                 </p>
               </div>
 
               {error && (
-                <div className="text-sm text-status-error bg-status-error/10 p-3 rounded border border-status-error/20">
+                <div className="text-sm text-error bg-error/10 px-3 py-2 rounded-lg border border-error/20">
                   {error}
                 </div>
               )}
@@ -161,14 +181,21 @@ export default function LoginPage() {
               <Button
                 type="submit"
                 disabled={isLoading}
-                className="w-full bg-xray-purple text-white hover:bg-xray-purple/80 font-display tracking-wider"
+                className="w-full h-10 bg-cell text-surface-ground hover:bg-cell/90 font-medium rounded-lg gap-2"
               >
-                {isLoading ? 'AUTHENTICATING...' : 'SIGN IN WITH API KEY'}
+                {isLoading ? (
+                  <span className="animate-pulse-soft">Signing in...</span>
+                ) : (
+                  <>
+                    Sign In with API Key
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
               </Button>
             </form>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }

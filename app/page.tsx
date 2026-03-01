@@ -21,7 +21,7 @@ import {
 } from '@dnd-kit/sortable';
 import { Button } from '@/components/ui/button';
 import { Header } from '@/components/layout/header';
-import { ParticleBeam } from '@/components/visualizations/particle-beam';
+import { CellularBackground } from '@/components/visualizations/cellular-background';
 import { EmptyState } from '@/components/monitor/empty-state';
 import { MonitorColumn } from '@/components/monitor/monitor-column';
 import { SortableMonitorColumn } from '@/components/monitor/sortable-monitor-column';
@@ -42,38 +42,27 @@ export default function DashboardPage() {
   const [activeMonitor, setActiveMonitor] = useState<MonitorConfig | null>(null);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8,
-      },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  // Redirect to login if not authenticated
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
       router.push('/login');
     }
   }, [authLoading, isAuthenticated, router]);
 
-  // Track if any column is connected
   useEffect(() => {
     setAnyConnected(monitors.length > 0);
   }, [monitors]);
 
   const handleDragStart = (event: DragStartEvent) => {
-    const { active } = event;
-    const monitor = monitors.find((m) => m.id === active.id);
-    setActiveMonitor(monitor || null);
+    setActiveMonitor(monitors.find((m) => m.id === event.active.id) || null);
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     setActiveMonitor(null);
-
     if (over && active.id !== over.id) {
       reorderMonitors(active.id as string, over.id as string);
     }
@@ -81,25 +70,26 @@ export default function DashboardPage() {
 
   if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-void">
+      <div className="min-h-screen flex items-center justify-center bg-surface-ground">
         <div className="text-center">
-          <div className="h-8 w-8 border-2 border-beam-cyan border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <div className="h-8 w-8 border-2 border-beam border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           <p className="text-text-secondary text-sm">Loading...</p>
         </div>
       </div>
     );
   }
 
-  if (!isAuthenticated) {
-    return null;
-  }
+  if (!isAuthenticated) return null;
 
   return (
-    <div className="min-h-screen flex flex-col bg-void scan-lines grain">
-      <ParticleBeam />
+    <div className="min-h-screen flex flex-col bg-surface-ground">
+      {/* Background */}
+      <CellularBackground />
 
+      {/* Header */}
       <Header isConnected={anyConnected} />
 
+      {/* Main Content */}
       <main className="flex-1 relative z-10">
         {monitors.length === 0 ? (
           <EmptyState onAddMonitor={() => setIsAddModalOpen(true)} />
@@ -115,7 +105,7 @@ export default function DashboardPage() {
                 items={monitors.map((m) => m.id)}
                 strategy={horizontalListSortingStrategy}
               >
-                <div className="flex gap-4 overflow-x-auto h-[calc(100vh-120px)]">
+                <div className="flex gap-4 overflow-x-auto h-[calc(100vh-120px)] pb-4">
                   <AnimatePresence mode="popLayout">
                     {monitors.map((monitor) => (
                       <SortableMonitorColumn
@@ -133,16 +123,15 @@ export default function DashboardPage() {
                   <Button
                     onClick={() => setIsAddModalOpen(true)}
                     variant="outline"
-                    className="flex-shrink-0 h-full w-16 border-dashed border-border-subtle hover:border-beam-cyan hover:bg-beam-cyan/5 transition-colors"
+                    className="flex-shrink-0 h-full w-14 border-dashed border-border-medium hover:border-beam hover:bg-beam/5 transition-all rounded-2xl group"
                   >
-                    <Plus className="h-6 w-6 text-text-dim" />
+                    <Plus className="h-5 w-5 text-text-tertiary group-hover:text-beam transition-colors" />
                   </Button>
                 </div>
               </SortableContext>
 
-              {/* Drag Overlay */}
               <DragOverlay>
-                {activeMonitor ? (
+                {activeMonitor && (
                   <div className="opacity-80">
                     <MonitorColumn
                       id={activeMonitor.id}
@@ -152,21 +141,20 @@ export default function DashboardPage() {
                       onSelectItem={() => {}}
                     />
                   </div>
-                ) : null}
+                )}
               </DragOverlay>
             </DndContext>
           </div>
         )}
       </main>
 
-      {/* Add Monitor Modal */}
+      {/* Modals & Panels */}
       <AddMonitorModal
         open={isAddModalOpen}
         onOpenChange={setIsAddModalOpen}
         onAdd={addMonitor}
       />
 
-      {/* Detail Panel */}
       <AnimatePresence>
         {selectedItem && (
           <DetailPanel

@@ -34,7 +34,7 @@ export function SvgExportButton({ path, filename }: SvgExportButtonProps) {
         onClick={handleDownload}
         disabled={isDownloading}
         variant="outline"
-        className="w-full border-xray-purple text-xray-purple hover:bg-xray-purple/10"
+        className="w-full border-cell text-cell hover:bg-cell/10"
       >
         {isDownloading ? (
           <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -44,7 +44,7 @@ export function SvgExportButton({ path, filename }: SvgExportButtonProps) {
         Download SVG
       </Button>
       {error && (
-        <p className="text-xs text-status-error">{error}</p>
+        <p className="text-xs text-error">{error}</p>
       )}
     </div>
   );

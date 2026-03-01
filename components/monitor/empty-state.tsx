@@ -13,49 +13,68 @@ export function EmptyState({ onAddMonitor }: EmptyStateProps) {
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      className="flex flex-col items-center justify-center min-h-[60vh] text-center"
+      transition={{ duration: 0.6, ease: [0.4, 0, 0.2, 1] }}
+      className="flex flex-col items-center justify-center min-h-[60vh] text-center px-6"
     >
+      {/* Icon with glow */}
       <motion.div
-        initial={{ scale: 0.8 }}
-        animate={{ scale: 1 }}
-        transition={{ duration: 0.5, delay: 0.2 }}
-        className="relative"
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ delay: 0.2, duration: 0.5 }}
+        className="relative mb-8"
       >
-        <div className="absolute inset-0 bg-beam-cyan/20 blur-3xl rounded-full" />
-        <div className="relative p-8 rounded-2xl bg-chamber/50 border border-border-subtle backdrop-blur-sm">
-          <Layers className="h-16 w-16 text-beam-cyan mb-4 mx-auto" />
-          <h2 className="text-xl font-display text-text-primary mb-2 tracking-wide">
-            NO MONITORS ACTIVE
-          </h2>
-          <p className="text-text-secondary text-sm max-w-xs mb-6">
-            Add a monitor to start tracking datasets from the Tiled server in real-time.
-          </p>
+        {/* Ambient glow */}
+        <div className="absolute inset-0 w-24 h-24 -m-6 rounded-full bg-beam/10 blur-2xl animate-breathe" />
 
-          <Button
-            onClick={onAddMonitor}
-            className="bg-beam-cyan text-void hover:bg-beam-cyan-bright font-display tracking-wider gap-2"
-          >
-            <Plus className="h-4 w-4" />
-            ADD MONITOR
-          </Button>
+        {/* Icon container */}
+        <div className="relative w-16 h-16 flex items-center justify-center rounded-2xl glass-card">
+          <Layers className="w-7 h-7 text-beam" />
         </div>
       </motion.div>
 
+      {/* Text */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ delay: 0.5 }}
-        className="mt-8 text-text-dim text-xs max-w-md"
+        transition={{ delay: 0.3, duration: 0.5 }}
+        className="max-w-md mb-8"
       >
-        <p>
-          Monitors subscribe to Tiled containers and display new datasets as they arrive.
-          Try adding{' '}
-          <code className="text-beam-cyan bg-elevated px-1 py-0.5 rounded">
-            tst/sandbox/synaps/reconstructions
-          </code>
+        <h2 className="text-xl font-semibold text-text-primary mb-2">
+          No monitors active
+        </h2>
+        <p className="text-text-secondary text-sm leading-relaxed">
+          Add a monitor to start tracking datasets from the Tiled server.
+          New data will stream in real-time as experiments run.
         </p>
       </motion.div>
+
+      {/* CTA Button */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.4, duration: 0.5 }}
+      >
+        <Button
+          onClick={onAddMonitor}
+          className="h-11 px-6 bg-beam text-surface-ground hover:bg-beam/90 font-medium rounded-xl gap-2 beam-caustic"
+        >
+          <Plus className="w-4 h-4" />
+          Add Monitor
+        </Button>
+      </motion.div>
+
+      {/* Hint */}
+      <motion.p
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.6, duration: 0.5 }}
+        className="mt-8 text-xs text-text-tertiary max-w-sm"
+      >
+        Try monitoring{' '}
+        <code className="text-beam bg-beam/10 px-1.5 py-0.5 rounded font-mono">
+          tst/sandbox/synaps/reconstructions
+        </code>
+      </motion.p>
     </motion.div>
   );
 }
