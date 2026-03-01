@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { DatasetItem } from '@/lib/tiled/types';
-import { TiledWebSocket, createTiledWebSocket } from '@/lib/tiled/websocket';
+import { TiledWebSocket, createTiledWebSocket, WEBSOCKETS_ENABLED } from '@/lib/tiled/websocket';
 
 interface UseTiledSubscriptionOptions {
   enabled?: boolean;
@@ -91,6 +91,16 @@ export function useTiledSubscription(
 
   useEffect(() => {
     if (!enabled || !path) return;
+
+    // If WebSockets are disabled, go straight to polling
+    if (!WEBSOCKETS_ENABLED) {
+      console.log('[Subscription] WebSockets disabled, using polling');
+      usePollingRef.current = true;
+      startPolling();
+      return () => {
+        stopPolling();
+      };
+    }
 
     // Try WebSocket first
     const ws = createTiledWebSocket(path, {

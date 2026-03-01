@@ -1,7 +1,11 @@
 import { WebSocketMessage, DatasetItem } from './types';
 import { getValidAccessToken, getAuthType } from './auth';
 
-const TILED_URL = process.env.NEXT_PUBLIC_TILED_URL || 'https://tiled.nsls2.bnl.gov';
+// Set to false to disable WebSockets entirely and use polling instead
+export const WEBSOCKETS_ENABLED = false;
+
+// Use our local WebSocket proxy to avoid browser header limitations
+const USE_PROXY = true;
 
 export interface WebSocketOptions {
   onMessage: (item: DatasetItem) => void;
@@ -31,22 +35,44 @@ export class TiledWebSocket {
 
     const token = await getValidAccessToken();
     const authType = getAuthType();
-    const wsUrl = TILED_URL.replace('https://', 'wss://').replace('http://', 'ws://');
-    let url = `${wsUrl}/api/v1/stream/single/${this.path}`;
 
-    if (this.options.includeHistory) {
-      url += '?start=0';
+    let url: string;
+
+    if (USE_PROXY) {
+      // Connect to our local proxy which will add auth headers
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      url = `${wsProtocol}//${window.location.host}/api/ws/${this.path}`;
+
+      // Pass token as query param to our proxy
+      const params = new URLSearchParams();
+      if (token) {
+        params.set('token', token);
+        params.set('auth_type', authType || 'token');
+      }
+      if (this.options.includeHistory) {
+        params.set('start', '0');
+      }
+      if (params.toString()) {
+        url += `?${params.toString()}`;
+      }
+    } else {
+      // Direct connection (won't work in browser due to header limitations)
+      const TILED_URL = process.env.NEXT_PUBLIC_TILED_URL || 'https://tiled.nsls2.bnl.gov';
+      const wsUrl = TILED_URL.replace('https://', 'wss://').replace('http://', 'ws://');
+      url = `${wsUrl}/api/v1/stream/single/${this.path}`;
+
+      if (this.options.includeHistory) {
+        url += '?start=0';
+      }
+      if (token) {
+        const paramName = authType === 'apikey' ? 'api_key' : 'access_token';
+        const encodedToken = encodeURIComponent(token);
+        url += `${url.includes('?') ? '&' : '?'}${paramName}=${encodedToken}`;
+      }
     }
 
-    // Add auth - API keys use 'api_key' param, tokens use 'access_token'
-    if (token) {
-      const paramName = authType === 'apikey' ? 'api_key' : 'access_token';
-      const encodedToken = encodeURIComponent(token);
-      url += `${url.includes('?') ? '&' : '?'}${paramName}=${encodedToken}`;
-    }
-
-    console.log('[WebSocket] Connecting to:', url.replace(/[?&](api_key|access_token)=[^&]+/, '?$1=***'));
-    console.log('[WebSocket] Auth type:', authType);
+    console.log('[WebSocket] Connecting to:', url.replace(/token=[^&]+/, 'token=***'));
+    console.log('[WebSocket] Using proxy:', USE_PROXY);
 
     this.ws = new WebSocket(url);
 
@@ -59,15 +85,32 @@ export class TiledWebSocket {
     this.ws.onmessage = (event) => {
       console.log('[WebSocket] Message received:', event.data.substring(0, 200));
       try {
-        const msg: WebSocketMessage = JSON.parse(event.data);
+        const msg = JSON.parse(event.data);
 
-        if (msg.type === 'container-child-created') {
+        // Handle proxy status messages
+        if (msg.type === 'proxy-connected') {
+          console.log('[WebSocket] Proxy connected to Tiled');
+          return;
+        }
+        if (msg.type === 'proxy-error') {
+          // Server-side issue (e.g., streaming not enabled for this catalog)
+          console.warn('[WebSocket] Proxy error, falling back to polling:', msg.error);
+          // If server returned 500, don't retry - streaming may not be supported
+          if (msg.error?.includes('500') || msg.recoverable === false) {
+            this.reconnectAttempts = this.maxReconnectAttempts; // Skip retries
+          }
+          return;
+        }
+
+        // Handle Tiled messages
+        const tiledMsg = msg as WebSocketMessage;
+        if (tiledMsg.type === 'container-child-created') {
           const item: DatasetItem = {
-            id: msg.key,
-            path: `${this.path}/${msg.key}`,
-            metadata: msg.metadata,
-            structureFamily: msg.structure_family,
-            timeCreated: msg.timestamp,
+            id: tiledMsg.key,
+            path: `${this.path}/${tiledMsg.key}`,
+            metadata: tiledMsg.metadata,
+            structureFamily: tiledMsg.structure_family,
+            timeCreated: tiledMsg.timestamp,
             isNew: true,
           };
           this.options.onMessage(item);
