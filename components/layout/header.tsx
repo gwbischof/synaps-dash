@@ -33,7 +33,7 @@ export function Header({ isConnected = false }: HeaderProps) {
               </svg>
             </div>
             <span className="text-[15px] font-semibold text-text-primary tracking-tight">
-              SYNAPS
+              SYNAPS Demo
             </span>
           </div>
 

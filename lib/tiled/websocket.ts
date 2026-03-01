@@ -8,6 +8,7 @@ export interface WebSocketOptions {
   onConnect?: () => void;
   onDisconnect?: () => void;
   onError?: (error: Event) => void;
+  onMaxReconnectReached?: () => void;
   includeHistory?: boolean;
 }
 
@@ -16,7 +17,7 @@ export class TiledWebSocket {
   private path: string;
   private options: WebSocketOptions;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 10;
+  private maxReconnectAttempts = 3; // Fail fast and fall back to polling
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private isManualClose = false;
 
@@ -81,7 +82,8 @@ export class TiledWebSocket {
 
   private scheduleReconnect(): void {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('Max reconnect attempts reached');
+      console.log('[WebSocket] Max reconnect attempts reached, triggering fallback');
+      this.options.onMaxReconnectReached?.();
       return;
     }
 

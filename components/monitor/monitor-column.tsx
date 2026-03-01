@@ -37,6 +37,7 @@ export function MonitorColumn({
     error,
     loadMore,
     isConnected,
+    mode,
   } = useInfiniteScrollWithWebSocket(path);
 
   const lastItemRef = useCallback(
@@ -185,7 +186,9 @@ export function MonitorColumn({
               'status-dot',
               isConnected ? 'status-dot-live animate-pulse-live' : 'bg-text-tertiary'
             )} />
-            {isConnected ? 'Live' : 'Offline'}
+            {isConnected
+              ? mode === 'websocket' ? 'Live' : 'Polling'
+              : 'Offline'}
           </span>
         </div>
       </div>

@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SYNAPS Pipeline Monitor",
-  description: "Real-time monitoring dashboard for the SYNAPS AI segmentation pipeline at NSLS-II",
+  title: "SYNAPS Demo",
+  description: "Demo dashboard for the SYNAPS AI segmentation pipeline at NSLS-II",
 };
 
 export default function RootLayout({

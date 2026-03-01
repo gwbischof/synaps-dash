@@ -61,7 +61,7 @@ export default function LoginPage() {
             </svg>
           </div>
           <span className="text-xl font-semibold text-text-primary tracking-tight">
-            SYNAPS
+            SYNAPS Demo
           </span>
         </div>
 
