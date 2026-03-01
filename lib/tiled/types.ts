@@ -65,6 +65,7 @@ export interface DatasetItem {
   path: string;
   metadata: Record<string, unknown>;
   structureFamily: 'array' | 'container' | 'table';
+  specs?: string[];
   shape?: number[];
   timeCreated?: string;
   isNew?: boolean;

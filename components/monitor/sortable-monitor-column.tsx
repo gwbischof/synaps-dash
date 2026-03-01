@@ -46,12 +46,12 @@ export function SortableMonitorColumn({
         isDragging && 'opacity-50'
       )}
     >
-      {/* Drag handle overlay at the top */}
+      {/* Drag handle overlay at the top - leaves space on right for close button */}
       <div
         {...attributes}
         {...listeners}
         className={cn(
-          'absolute top-0 left-0 right-0 h-12 z-10 cursor-grab active:cursor-grabbing',
+          'absolute top-0 left-0 right-10 h-12 z-10 cursor-grab active:cursor-grabbing',
           'flex items-center justify-center',
           'opacity-0 hover:opacity-100 transition-opacity',
           'bg-gradient-to-b from-beam-cyan/10 to-transparent'

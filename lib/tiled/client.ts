@@ -62,9 +62,55 @@ export async function listChildren(
     path: `${path}/${node.id}`,
     metadata: node.attributes.metadata,
     structureFamily: node.attributes.structure_family,
+    specs: node.attributes.specs?.map((s) => s.name) || [],
     shape: node.attributes.structure?.shape,
-    timeCreated: node.attributes.metadata.time_created as string | undefined,
+    timeCreated: findTimestamp(node.attributes.metadata),
   }));
+
+  function findTimestamp(metadata: Record<string, unknown>): string | undefined {
+    if (!metadata) return undefined;
+
+    // Common timestamp field names
+    const timestampKeys = [
+      'time_created',
+      'time',
+      'timestamp',
+      'created_at',
+      'creation_time',
+      'date',
+      'datetime',
+    ];
+
+    for (const key of timestampKeys) {
+      if (metadata[key] !== undefined) {
+        const value = metadata[key];
+        // Handle both string timestamps and unix timestamps
+        if (typeof value === 'string') return value;
+        if (typeof value === 'number') {
+          // Unix timestamp (seconds) - convert to ISO string
+          return new Date(value * 1000).toISOString();
+        }
+      }
+    }
+
+    // Check nested in start document
+    if (metadata.start && typeof metadata.start === 'object') {
+      const start = metadata.start as Record<string, unknown>;
+      if (start.time !== undefined) {
+        const value = start.time;
+        if (typeof value === 'string') return value;
+        if (typeof value === 'number') return new Date(value * 1000).toISOString();
+      }
+    }
+
+    // Check export_timestamp
+    if (metadata.export_timestamp !== undefined) {
+      const value = metadata.export_timestamp;
+      if (typeof value === 'number') return new Date(value * 1000).toISOString();
+    }
+
+    return undefined;
+  }
 
   // If no sort was used, reverse to show newest first (assuming server returns oldest first)
   if (!usedSort && offset === 0) {

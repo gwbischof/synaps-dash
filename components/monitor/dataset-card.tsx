@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { DatasetItem } from '@/lib/tiled/types';
 import { useTiledThumbnail } from '@/hooks/use-tiled-array';
 import { cn } from '@/lib/utils';
-import { Hexagon, Layers, Activity, Clock, Microscope } from 'lucide-react';
+import { Hexagon, Layers, Activity, Clock, Microscope, Grid3X3, Table, Database } from 'lucide-react';
 
 interface DatasetCardProps {
   item: DatasetItem;
@@ -20,33 +20,49 @@ function formatId(id: string): string {
 
 function findScanId(metadata: Record<string, unknown>): number | string | undefined {
   if (!metadata) return undefined;
+
+  // Direct scan_id at top level
   if (metadata.scan_id !== undefined) return metadata.scan_id as number | string;
-  if (metadata.start && typeof metadata.start === 'object') {
-    const start = metadata.start as Record<string, unknown>;
-    if (start.scan_id !== undefined) return start.scan_id as number | string;
+
+  // Try various nested locations
+  const nestedKeys = ['start', 'start_doc', 'summary', 'scan', 'attrs', 'attributes', 'meta'];
+  for (const key of nestedKeys) {
+    if (metadata[key] && typeof metadata[key] === 'object') {
+      const nested = metadata[key] as Record<string, unknown>;
+      if (nested.scan_id !== undefined) return nested.scan_id as number | string;
+      if (nested.id !== undefined && key === 'scan') return nested.id as number | string;
+    }
   }
-  if (metadata.start_doc && typeof metadata.start_doc === 'object') {
-    const startDoc = metadata.start_doc as Record<string, unknown>;
-    if (startDoc.scan_id !== undefined) return startDoc.scan_id as number | string;
+
+  // Check for scan_id in any top-level object
+  for (const [key, value] of Object.entries(metadata)) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const nested = value as Record<string, unknown>;
+      if (nested.scan_id !== undefined) return nested.scan_id as number | string;
+    }
   }
-  if (metadata.summary && typeof metadata.summary === 'object') {
-    const summary = metadata.summary as Record<string, unknown>;
-    if (summary.scan_id !== undefined) return summary.scan_id as number | string;
-  }
-  if (metadata.scan && typeof metadata.scan === 'object') {
-    const scan = metadata.scan as Record<string, unknown>;
-    if (scan.id !== undefined) return scan.id as number | string;
-    if (scan.scan_id !== undefined) return scan.scan_id as number | string;
-  }
+
+  // Check parent metadata
   if (metadata.parent && typeof metadata.parent === 'object') {
     return findScanId(metadata.parent as Record<string, unknown>);
   }
+
   return undefined;
 }
 
-function formatRelativeTime(timestamp: string | undefined): string {
+function formatRelativeTime(timestamp: string | number | undefined): string {
   if (!timestamp) return '';
-  const date = new Date(timestamp);
+
+  let date: Date;
+  if (typeof timestamp === 'number') {
+    // Unix timestamp (seconds)
+    date = new Date(timestamp * 1000);
+  } else {
+    date = new Date(timestamp);
+  }
+
+  if (isNaN(date.getTime())) return '';
+
   const now = new Date();
   const diff = now.getTime() - date.getTime();
   const minutes = Math.floor(diff / 60000);
@@ -56,7 +72,65 @@ function formatRelativeTime(timestamp: string | undefined): string {
   if (minutes < 60) return `${minutes}m`;
   if (hours < 24) return `${hours}h`;
   if (days < 7) return `${days}d`;
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+  // Include year in the date format
+  const year = date.getFullYear();
+  const month = date.toLocaleDateString('en-US', { month: 'short' });
+  const day = date.getDate();
+  return `${month} ${day}, ${year}`;
+}
+
+function findTimestamp(metadata: Record<string, unknown>, itemTimeCreated?: string): string | number | undefined {
+  // First check if item already has timeCreated
+  if (itemTimeCreated) return itemTimeCreated;
+
+  if (!metadata) return undefined;
+
+  // Common timestamp field names
+  const timestampKeys = [
+    'time_created',
+    'time',
+    'timestamp',
+    'created_at',
+    'creation_time',
+    'date',
+    'datetime',
+    'export_timestamp',
+  ];
+
+  // Check top level
+  for (const key of timestampKeys) {
+    if (metadata[key] !== undefined) {
+      return metadata[key] as string | number;
+    }
+  }
+
+  // Check nested objects
+  const nestedKeys = ['start', 'start_doc', 'summary', 'attrs', 'attributes', 'meta'];
+  for (const nestedKey of nestedKeys) {
+    if (metadata[nestedKey] && typeof metadata[nestedKey] === 'object') {
+      const nested = metadata[nestedKey] as Record<string, unknown>;
+      for (const key of timestampKeys) {
+        if (nested[key] !== undefined) {
+          return nested[key] as string | number;
+        }
+      }
+    }
+  }
+
+  // Check any top-level object for timestamp fields
+  for (const [key, value] of Object.entries(metadata)) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const nested = value as Record<string, unknown>;
+      for (const tsKey of timestampKeys) {
+        if (nested[tsKey] !== undefined) {
+          return nested[tsKey] as string | number;
+        }
+      }
+    }
+  }
+
+  return undefined;
 }
 
 // Element colors inspired by actual spectroscopy emission colors
@@ -81,6 +155,22 @@ function getElementStyle(element: string) {
     text: '#00e5ff',
     glow: 'rgba(0, 229, 255, 0.4)'
   };
+}
+
+// Type indicator config
+const TYPE_CONFIG: Record<string, { icon: typeof Layers; label: string; color: string }> = {
+  container: { icon: Layers, label: 'DIR', color: 'text-beam-cyan' },
+  array: { icon: Grid3X3, label: 'ARR', color: 'text-xray-purple' },
+  table: { icon: Table, label: 'TBL', color: 'text-status-processing' },
+  BlueskyRun: { icon: Database, label: 'RUN', color: 'text-status-complete' },
+};
+
+function getTypeConfig(structureFamily: string, specs?: string[]) {
+  // Check specs first for more specific types (like BlueskyRun)
+  if (specs?.includes('BlueskyRun')) {
+    return TYPE_CONFIG.BlueskyRun;
+  }
+  return TYPE_CONFIG[structureFamily] || TYPE_CONFIG.array;
 }
 
 export function DatasetCard({ item, onClick }: DatasetCardProps) {
@@ -123,6 +213,9 @@ export function DatasetCard({ item, onClick }: DatasetCardProps) {
   }
 
   const groupCount = metadata.groups ? Object.keys(metadata.groups).length : 0;
+
+  // Find timestamp from various sources
+  const timestamp = findTimestamp(metadata, item.timeCreated);
 
   return (
     <motion.div
@@ -196,14 +289,18 @@ export function DatasetCard({ item, onClick }: DatasetCardProps) {
               </>
             ) : (
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                {item.structureFamily === 'container' ? (
-                  <Layers className="h-5 w-5 text-beam-cyan/40" />
-                ) : (
-                  <Microscope className="h-5 w-5 text-xray-purple/40" />
-                )}
-                <span className="text-[8px] text-text-dim mt-1 font-mono uppercase tracking-wider">
-                  {item.structureFamily === 'container' ? 'DIR' : 'DATA'}
-                </span>
+                {(() => {
+                  const typeConfig = getTypeConfig(item.structureFamily, item.specs);
+                  const TypeIcon = typeConfig.icon;
+                  return (
+                    <>
+                      <TypeIcon className={cn('h-5 w-5 opacity-40', typeConfig.color)} />
+                      <span className={cn('text-[8px] mt-1 font-mono uppercase tracking-wider opacity-60', typeConfig.color)}>
+                        {typeConfig.label}
+                      </span>
+                    </>
+                  );
+                })()}
               </div>
             )}
 
@@ -216,6 +313,20 @@ export function DatasetCard({ item, onClick }: DatasetCardProps) {
                 </span>
               </div>
             )}
+
+            {/* Type indicator badge */}
+            {(() => {
+              const typeConfig = getTypeConfig(item.structureFamily, item.specs);
+              const TypeIcon = typeConfig.icon;
+              return (
+                <div className="absolute bottom-0 left-0 flex items-center gap-0.5 px-1 py-0.5 bg-[#050508]/90 border-t border-r border-[rgba(255,255,255,0.08)]">
+                  <TypeIcon className={cn('h-2.5 w-2.5', typeConfig.color)} />
+                  <span className={cn('text-[7px] font-mono font-semibold tracking-wider', typeConfig.color)}>
+                    {typeConfig.label}
+                  </span>
+                </div>
+              );
+            })()}
           </div>
         </div>
 
@@ -293,11 +404,11 @@ export function DatasetCard({ item, onClick }: DatasetCardProps) {
                 {metadata.step_size}μm
               </span>
             )}
-            {item.timeCreated && (
+            {timestamp && (
               <div className="flex items-center gap-1 ml-auto">
                 <Clock className="h-2.5 w-2.5 text-text-dim" />
                 <span className="text-[10px] font-mono text-text-dim">
-                  {formatRelativeTime(item.timeCreated)}
+                  {formatRelativeTime(timestamp)}
                 </span>
               </div>
             )}
