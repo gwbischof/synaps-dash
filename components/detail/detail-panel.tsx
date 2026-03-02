@@ -140,7 +140,7 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
           {/* Array Viewer */}
           {isArray && (
             <div className="space-y-3">
-              <ArrayViewer path={item.path} />
+              <ArrayViewer path={item.path} metadata={metadata} />
               <SvgExportButton path={item.path} filename={`${metadata.scan_id || item.id}.svg`} />
             </div>
           )}
