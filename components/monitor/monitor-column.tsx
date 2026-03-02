@@ -108,10 +108,10 @@ export function MonitorColumn({
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-tertiary" />
           <Input
             type="text"
-            placeholder="Search..."
+            placeholder="Search or scan_id:123..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="h-8 pl-8 pr-3 text-xs bg-surface-ground border-border-subtle placeholder:text-text-tertiary focus:border-beam focus:ring-1 focus:ring-beam/20"
+            className="h-8 pl-8 pr-8 text-xs bg-surface-ground border-border-subtle placeholder:text-text-tertiary focus:border-beam focus:ring-1 focus:ring-beam/20"
           />
           {searchQuery && (
             <button

@@ -26,6 +26,34 @@ export interface ListChildrenOptions {
   filters?: Record<string, string>;
 }
 
+// Parse search query for field-specific filters
+// Supports: "scan_id:12345", "element:Fe", or just "12345" (treated as scan_id)
+function parseSearchQuery(query: string): { fullText?: string; fieldFilters: Record<string, string> } {
+  const trimmed = query.trim();
+  if (!trimmed) return { fieldFilters: {} };
+
+  const fieldFilters: Record<string, string> = {};
+
+  // Check for field:value patterns
+  const fieldPattern = /^(\w+):(.+)$/;
+  const match = trimmed.match(fieldPattern);
+
+  if (match) {
+    const [, field, value] = match;
+    fieldFilters[field] = value.trim();
+    return { fieldFilters };
+  }
+
+  // If it's just a number, treat as scan_id search
+  if (/^\d+$/.test(trimmed)) {
+    fieldFilters['scan_id'] = trimmed;
+    return { fieldFilters };
+  }
+
+  // Otherwise, use fulltext search
+  return { fullText: trimmed, fieldFilters: {} };
+}
+
 export async function listChildren(
   path: string,
   options: ListChildrenOptions = {}
@@ -45,9 +73,20 @@ export async function listChildren(
       url.searchParams.set('sort', sortOption);
     }
 
-    // Add FullText search if provided
+    // Parse and apply search query
     if (fullText && fullText.trim()) {
-      url.searchParams.set('filter[fulltext][condition][text]', fullText.trim());
+      const parsed = parseSearchQuery(fullText);
+
+      // Apply fulltext search if present
+      if (parsed.fullText) {
+        url.searchParams.set('filter[fulltext][condition][text]', parsed.fullText);
+      }
+
+      // Apply field-specific Eq filters
+      for (const [field, value] of Object.entries(parsed.fieldFilters)) {
+        url.searchParams.set('filter[eq][condition][key]', field);
+        url.searchParams.set('filter[eq][condition][value]', value);
+      }
     }
 
     // Add additional filters if provided
