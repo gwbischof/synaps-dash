@@ -140,8 +140,8 @@ export function getThumbnailUrl(path: string): string {
   return `${API_BASE}/array/full/${path}?format=image/png`;
 }
 
-export function getSvgUrl(path: string): string {
-  return `${API_BASE}/array/full/${path}?format=image/svg%2Bxml`;
+export function getPngUrl(path: string): string {
+  return `${API_BASE}/array/full/${path}?format=image/png`;
 }
 
 export function getArrayFullUrl(path: string, format: string = 'image/png'): string {
@@ -166,16 +166,25 @@ export async function fetchThumbnail(path: string): Promise<string | null> {
   }
 }
 
-export async function downloadSvg(path: string, filename: string): Promise<void> {
+export async function downloadImage(path: string, filename: string): Promise<void> {
   const authHeader = getAuthHeader();
-  const url = getSvgUrl(path);
+  const url = getPngUrl(path);
 
   const response = await fetch(url, {
     headers: authHeader ? { Authorization: authHeader } : {},
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to download SVG: ${response.status}`);
+    const errorText = await response.text();
+    throw new Error(`Failed to download image: ${response.status}`);
+  }
+
+  const contentType = response.headers.get('content-type') || '';
+
+  // Check if we got an error response instead of image
+  if (contentType.includes('application/json')) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || 'Server returned error instead of image');
   }
 
   const blob = await response.blob();
