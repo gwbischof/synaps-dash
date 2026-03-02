@@ -72,8 +72,7 @@ export function CellularBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cellsRef = useRef<Cell[]>([]);
   const beamsRef = useRef<Beam[]>([]);
-  const starsRef = useRef<{ x: number; y: number; size: number; twinkleOffset: number }[]>([]);
-  const timeRef = useRef(0);
+  const starsRef = useRef<{ x: number; y: number; size: number }[]>([]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -82,7 +81,6 @@ export function CellularBackground() {
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
 
-    let animationId: number;
     let w = window.innerWidth;
     let h = window.innerHeight;
 
@@ -105,7 +103,6 @@ export function CellularBackground() {
           x: Math.random() * w,
           y: Math.random() * h,
           size: Math.random() * 1.5 + 0.5,
-          twinkleOffset: Math.random() * Math.PI * 2,
         });
       }
 
@@ -182,18 +179,6 @@ export function CellularBackground() {
     };
 
     const render = () => {
-      timeRef.current += 0.016;
-
-      // Update cell positions
-      cellsRef.current.forEach(cell => {
-        cell.x += cell.vx;
-        cell.y += cell.vy;
-
-        if (cell.x < -120) cell.x = w + 120;
-        if (cell.x > w + 120) cell.x = -120;
-        if (cell.y < -120) cell.y = h + 120;
-        if (cell.y > h + 120) cell.y = -120;
-      });
 
       // Deep space background gradient
       const bgGradient = ctx.createRadialGradient(w * 0.5, h * 0.5, 0, w * 0.5, h * 0.5, Math.max(w, h) * 0.9);
@@ -204,12 +189,11 @@ export function CellularBackground() {
       ctx.fillStyle = bgGradient;
       ctx.fillRect(0, 0, w, h);
 
-      // Draw distant stars
+      // Draw distant stars (static)
       starsRef.current.forEach(star => {
-        const twinkle = Math.sin(timeRef.current * 2 + star.twinkleOffset) * 0.3 + 0.7;
         ctx.beginPath();
         ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(200, 210, 255, ${0.3 * twinkle})`;
+        ctx.fillStyle = `rgba(200, 210, 255, 0.25)`;
         ctx.fill();
       });
 
@@ -324,8 +308,6 @@ export function CellularBackground() {
       vignette.addColorStop(1, 'rgba(4, 4, 8, 0.5)');
       ctx.fillStyle = vignette;
       ctx.fillRect(0, 0, w, h);
-
-      animationId = requestAnimationFrame(render);
     };
 
     init();
@@ -333,12 +315,12 @@ export function CellularBackground() {
 
     const handleResize = () => {
       init();
+      render();
     };
     window.addEventListener('resize', handleResize);
 
     return () => {
       window.removeEventListener('resize', handleResize);
-      cancelAnimationFrame(animationId);
     };
   }, []);
 

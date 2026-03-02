@@ -58,59 +58,48 @@ export async function listChildren(
   path: string,
   options: ListChildrenOptions = {}
 ): Promise<{ items: DatasetItem[]; hasMore: boolean; totalCount: number }> {
-  const { offset = 0, limit = 20, sort = '-time_created', fullText, filters } = options;
+  // Note: 'id' is the only universal sort field guaranteed to work across all tiled catalogs
+  const { offset = 0, limit = 20, sort = '-id', fullText, filters } = options;
 
-  // Try sort options in order of preference
-  const sortOptions = sort ? [sort, '-scan_id', ''] : [''];
-  let response: Response | null = null;
-  let usedSort = '';
+  const url = new URL(`${API_BASE}/search/${path}`, window.location.origin);
+  url.searchParams.set('page[offset]', offset.toString());
+  url.searchParams.set('page[limit]', limit.toString());
+  if (sort) {
+    url.searchParams.set('sort', sort);
+  }
 
-  for (const sortOption of sortOptions) {
-    const url = new URL(`${API_BASE}/search/${path}`, window.location.origin);
-    url.searchParams.set('page[offset]', offset.toString());
-    url.searchParams.set('page[limit]', limit.toString());
-    if (sortOption) {
-      url.searchParams.set('sort', sortOption);
+  // Parse and apply search query
+  if (fullText && fullText.trim()) {
+    const parsed = parseSearchQuery(fullText);
+
+    // Apply fulltext search if present
+    if (parsed.fullText) {
+      url.searchParams.set('filter[fulltext][condition][text]', parsed.fullText);
     }
 
-    // Parse and apply search query
-    if (fullText && fullText.trim()) {
-      const parsed = parseSearchQuery(fullText);
-
-      // Apply fulltext search if present
-      if (parsed.fullText) {
-        url.searchParams.set('filter[fulltext][condition][text]', parsed.fullText);
-      }
-
-      // Apply field-specific Eq filters
-      for (const [field, value] of Object.entries(parsed.fieldFilters)) {
-        url.searchParams.set('filter[eq][condition][key]', field);
-        url.searchParams.set('filter[eq][condition][value]', value);
-      }
-    }
-
-    // Add additional filters if provided
-    if (filters) {
-      for (const [key, value] of Object.entries(filters)) {
-        url.searchParams.set(key, value);
-      }
-    }
-
-    response = await fetchWithAuth(url.toString());
-
-    if (response.ok) {
-      usedSort = sortOption;
-      break;
+    // Apply field-specific Eq filters
+    for (const [field, value] of Object.entries(parsed.fieldFilters)) {
+      url.searchParams.set('filter[eq][condition][key]', field);
+      url.searchParams.set('filter[eq][condition][value]', value);
     }
   }
 
-  if (!response || !response.ok) {
-    throw new Error(`Failed to list children: ${response?.status} ${response?.statusText}`);
+  // Add additional filters if provided
+  if (filters) {
+    for (const [key, value] of Object.entries(filters)) {
+      url.searchParams.set(key, value);
+    }
+  }
+
+  const response = await fetchWithAuth(url.toString());
+
+  if (!response.ok) {
+    throw new Error(`Failed to list children: ${response.status} ${response.statusText}`);
   }
 
   const data: TiledSearchResponse<TiledNode> = await response.json();
 
-  let items: DatasetItem[] = data.data.map((node) => ({
+  const items: DatasetItem[] = data.data.map((node) => ({
     id: node.id,
     path: `${path}/${node.id}`,
     metadata: node.attributes.metadata,
@@ -163,11 +152,6 @@ export async function listChildren(
     }
 
     return undefined;
-  }
-
-  // If no sort was used, reverse to show newest first (assuming server returns oldest first)
-  if (!usedSort && offset === 0) {
-    items = items.reverse();
   }
 
   return {
@@ -250,6 +234,15 @@ export async function downloadImage(path: string, filename: string): Promise<voi
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(objectUrl);
+}
+
+export async function fetchArrayData(path: string): Promise<number[][]> {
+  const url = `${API_BASE}/array/full/${path}?format=application/json`;
+  const response = await fetchWithAuth(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch array: ${response.status}`);
+  }
+  return response.json();
 }
 
 export { TILED_URL };

@@ -9,6 +9,7 @@ import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ArrayViewer } from './array-viewer';
 import { SvgExportButton } from './svg-export-button';
+import { SegmentationPlotButton } from './segmentation-plot';
 import { DatasetItem } from '@/lib/tiled/types';
 
 interface DetailPanelProps {
@@ -140,8 +141,13 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
           {/* Array Viewer */}
           {isArray && (
             <div className="space-y-3">
-              <ArrayViewer path={item.path} metadata={metadata} />
+              <ArrayViewer path={item.path} metadata={metadata} showScalebar={false} showColorbar={false} />
               <SvgExportButton path={item.path} filename={`${metadata.scan_id || item.id}.svg`} />
+              <SegmentationPlotButton
+                path={item.path}
+                metadata={metadata}
+                title={`Segmentation - Scan ${metadata.scan_id || item.id}`}
+              />
             </div>
           )}
 

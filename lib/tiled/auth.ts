@@ -64,8 +64,9 @@ export function clearTokens(): void {
 export function isTokenExpired(): boolean {
   const { expiresAt } = getStoredTokens();
   if (!expiresAt) return true;
-  // Consider expired 1 minute before actual expiry
-  return Date.now() > expiresAt - 60000;
+  // Consider expired 2 minutes before actual expiry to allow time for refresh
+  // (Token lifetime is only 15 minutes, so we can't use a large buffer)
+  return Date.now() > expiresAt - 2 * 60 * 1000;
 }
 
 export async function loginWithPassword(username: string, password: string): Promise<TokenResponse> {
@@ -106,32 +107,49 @@ export async function validateApiKey(apiKey: string): Promise<TiledUser> {
   return user;
 }
 
-export async function refreshAccessToken(): Promise<TokenResponse | null> {
+export async function refreshAccessToken(retries = 2): Promise<TokenResponse | null> {
   const { refreshToken } = getStoredTokens();
   if (!refreshToken) return null;
 
-  try {
-    // Use local API route to avoid CORS issues
-    const response = await fetch('/api/auth/refresh', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      // Use local API route to avoid CORS issues
+      const response = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
 
-    if (!response.ok) {
-      clearTokens();
-      return null;
+      if (response.ok) {
+        const data: TokenResponse = await response.json();
+        storeTokens(data);
+        return data;
+      }
+
+      // Only clear tokens on auth errors (401/403), not network issues
+      if (response.status === 401 || response.status === 403) {
+        clearTokens();
+        return null;
+      }
+
+      // For other errors, retry
+      if (attempt < retries) {
+        await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+        continue;
+      }
+    } catch {
+      // Network error - retry if attempts remaining
+      if (attempt < retries) {
+        await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+        continue;
+      }
     }
-
-    const data: TokenResponse = await response.json();
-    storeTokens(data);
-    return data;
-  } catch {
-    clearTokens();
-    return null;
   }
+
+  // All retries exhausted but don't clear tokens - might be temporary network issue
+  return null;
 }
 
 export async function getCurrentUser(accessTokenOrApiKey: string): Promise<TiledUser | null> {

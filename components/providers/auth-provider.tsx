@@ -107,23 +107,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     checkAuth();
   }, [checkAuth]);
 
-  // Schedule token refresh (only for token auth, not API keys)
+  // Periodic token refresh and validation (only for token auth, not API keys)
   useEffect(() => {
     if (!state.isAuthenticated) return;
     if (getAuthType() === 'apikey') return; // API keys don't expire
 
+    // Check and refresh token periodically (every 5 minutes)
+    const checkAndRefresh = async () => {
+      if (isTokenExpired()) {
+        const refreshed = await refreshAccessToken();
+        if (refreshed) {
+          checkAuth();
+        }
+      }
+    };
+
+    // Check every 10 minutes as a fallback (visibility change handles most cases)
+    const interval = setInterval(checkAndRefresh, 10 * 60 * 1000);
+
+    // Also check when tab becomes visible again
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkAndRefresh();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Schedule refresh before expiry (tokens only last 15 minutes)
     const { expiresAt } = getStoredTokens();
-    if (!expiresAt) return;
+    let timeout: NodeJS.Timeout | null = null;
+    if (expiresAt) {
+      const refreshIn = expiresAt - Date.now() - 3 * 60 * 1000; // 3 minutes before expiry
+      if (refreshIn > 0) {
+        timeout = setTimeout(async () => {
+          const refreshed = await refreshAccessToken();
+          if (refreshed) {
+            checkAuth();
+          }
+        }, refreshIn);
+      } else {
+        // Token is about to expire, refresh immediately
+        refreshAccessToken().then(refreshed => {
+          if (refreshed) checkAuth();
+        });
+      }
+    }
 
-    const refreshIn = expiresAt - Date.now() - 60000; // 1 minute before expiry
-    if (refreshIn <= 0) return;
-
-    const timeout = setTimeout(async () => {
-      await refreshAccessToken();
-      checkAuth();
-    }, refreshIn);
-
-    return () => clearTimeout(timeout);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (timeout) clearTimeout(timeout);
+    };
   }, [state.isAuthenticated, state.accessToken, checkAuth]);
 
   const login = async (username: string, password: string) => {
