@@ -1,17 +1,19 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { fetchThumbnail, listChildren } from '@/lib/tiled/client';
+import { fetchThumbnail, listChildren, findReconstructionByScanId } from '@/lib/tiled/client';
 
 interface UseTiledThumbnailOptions {
   // Hardcoded subpath to append for thumbnail (e.g., "Ni" for reconstructions)
   subpath?: string;
   // If true, discover the first array child dynamically
   discoverArray?: boolean;
+  // If set, look up corresponding reconstruction by scan_id
+  findReconstructionByScanId?: string;
 }
 
 export function useTiledThumbnail(path: string | null, options: UseTiledThumbnailOptions = {}) {
-  const { subpath, discoverArray = false } = options;
+  const { subpath, discoverArray = false, findReconstructionByScanId: scanIdToFind } = options;
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -30,6 +32,19 @@ export function useTiledThumbnail(path: string | null, options: UseTiledThumbnai
 
       try {
         let targetPath = subpath ? `${path}/${subpath}` : path;
+
+        // If scanIdToFind is set, look up corresponding reconstruction
+        if (scanIdToFind) {
+          const reconstructionArrayPath = await findReconstructionByScanId(path, scanIdToFind);
+          if (!reconstructionArrayPath) {
+            if (!cancelled) {
+              setThumbnailUrl(null);
+              setIsLoading(false);
+            }
+            return;
+          }
+          targetPath = reconstructionArrayPath;
+        }
 
         // If discoverArray is true, find the first array child
         if (discoverArray) {
@@ -88,7 +103,7 @@ export function useTiledThumbnail(path: string | null, options: UseTiledThumbnai
         URL.revokeObjectURL(thumbnailUrl);
       }
     };
-  }, [path, subpath, discoverArray]);
+  }, [path, subpath, discoverArray, scanIdToFind]);
 
   return { thumbnailUrl, isLoading, error };
 }

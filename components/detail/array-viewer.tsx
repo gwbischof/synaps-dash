@@ -149,6 +149,8 @@ interface ArrayViewerProps {
   colormap?: 'viridis' | 'grayscale';
   // For 3D arrays: total number of slices
   numSlices?: number;
+  // External segmentation table data for overlay
+  segmentationRows?: Record<string, unknown>[] | null;
 }
 
 // Color palette for different groups - cosmic theme
@@ -163,18 +165,21 @@ const GROUP_COLORS = [
 
 // Extract bounding boxes from metadata
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function extractBoundingBoxes(metadata?: Record<string, any>): BoundingBox[] {
+function extractBoundingBoxes(
+  metadata?: Record<string, any>,
+  segmentationRows?: Record<string, unknown>[] | null
+): BoundingBox[] {
   const boxes: BoundingBox[] = [];
-  if (!metadata) return boxes;
+  if (!metadata && !segmentationRows) return boxes;
 
-  const stepSize = metadata.step_size || 1;
-  const xStart = metadata.roi_positions?.x_start || 0;
-  const yStart = metadata.roi_positions?.y_start || 0;
+  const stepSize = metadata?.step_size || 1;
+  const xStart = metadata?.roi_positions?.x_start || 0;
+  const yStart = metadata?.roi_positions?.y_start || 0;
 
   let colorIndex = 0;
 
   // Method 1: Extract from groups -> formatted_unions (pixel coordinates)
-  if (metadata.groups) {
+  if (metadata?.groups) {
     for (const [groupName, groupDataRaw] of Object.entries(metadata.groups)) {
       const groupData = groupDataRaw as GroupData;
       const color = GROUP_COLORS[colorIndex % GROUP_COLORS.length];
@@ -248,7 +253,7 @@ function extractBoundingBoxes(metadata?: Record<string, any>): BoundingBox[] {
   }
 
   // Method 2: Extract from top-level fine_scans_tables
-  if (metadata.fine_scans_tables) {
+  if (metadata?.fine_scans_tables) {
     for (const [groupName, tableRaw] of Object.entries(metadata.fine_scans_tables)) {
       const table = tableRaw as Record<string, FineScansTableRow> | FineScansTableRow[];
       const color = GROUP_COLORS[colorIndex % GROUP_COLORS.length];
@@ -274,6 +279,31 @@ function extractBoundingBoxes(metadata?: Record<string, any>): BoundingBox[] {
         }
       }
       colorIndex++;
+    }
+  }
+
+  // Method 3: Add boxes from external segmentation table data
+  if (segmentationRows && segmentationRows.length > 0) {
+    const color = GROUP_COLORS[colorIndex % GROUP_COLORS.length];
+    for (const row of segmentationRows) {
+      const cx = row.cx as number;
+      const cy = row.cy as number;
+      const numX = (row.num_x as number) || 10;
+      const numY = (row.num_y as number) || 10;
+      if (cx !== undefined && cy !== undefined) {
+        const size = ((numX + numY) / 2) / stepSize;
+        const x = (cx - xStart) / stepSize - size / 2;
+        const y = (cy - yStart) / stepSize - size / 2;
+        boxes.push({
+          name: (row.label as string) || `Cell ${boxes.length + 1}`,
+          x,
+          y,
+          width: size,
+          height: size,
+          color,
+          groupName: 'Segmentation',
+        });
+      }
     }
   }
 
@@ -303,6 +333,7 @@ export function ArrayViewer({
   scalebarUnit = 'µm',
   colormap = 'viridis',
   numSlices,
+  segmentationRows,
 }: ArrayViewerProps) {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -312,7 +343,7 @@ export function ArrayViewer({
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
 
-  const boundingBoxes = extractBoundingBoxes(metadata);
+  const boundingBoxes = extractBoundingBoxes(metadata, segmentationRows);
 
   // Extract metadata values
   const stepSize = metadata?.step_size || 0.02; // default 20nm = 0.02µm

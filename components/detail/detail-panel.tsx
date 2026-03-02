@@ -2,13 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ChevronDown, Copy, Check, Layers, Grid3X3, Clock, Hash, Maximize2 } from 'lucide-react';
+import { X, ChevronDown, Copy, Check, Layers, Grid3X3, Clock, Hash, Maximize2, Activity } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ArrayViewer } from './array-viewer';
 import { SvgExportButton } from './svg-export-button';
 import { SegmentationPlotButton } from './segmentation-plot';
 import { DatasetItem } from '@/lib/tiled/types';
-import { listChildren } from '@/lib/tiled/client';
+import { listChildren, fetchTableData, findReconstructionByScanId } from '@/lib/tiled/client';
 
 interface DetailPanelProps {
   item: DatasetItem | null;
@@ -136,13 +136,49 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
   const [arrayPath, setArrayPath] = useState<string | null>(null);
   const [arrayShape, setArrayShape] = useState<number[] | null>(null);
   const [isDiscovering, setIsDiscovering] = useState(false);
+  const [segmentationTableData, setSegmentationTableData] = useState<Record<string, unknown>[] | null>(null);
 
   useEffect(() => {
     if (!item) return;
 
+    // Reset segmentation data when item changes
+    setSegmentationTableData(null);
+
     if (item.structureFamily === 'array') {
       setArrayPath(item.path);
       setArrayShape(item.shape || null);
+      return;
+    }
+
+    // Handle segmentation containers - find reconstruction and fetch table data
+    if (item.structureFamily === 'container' && item.path.includes('synaps/segmentations')) {
+      setIsDiscovering(true);
+      setArrayPath(null);
+      setArrayShape(null);
+
+      const scanIdMatch = item.id.match(/automap_(\d+)_/);
+      if (scanIdMatch) {
+        Promise.all([
+          findReconstructionByScanId(item.path, scanIdMatch[1]),
+          // Also fetch the first table child's data
+          listChildren(item.path, { limit: 10 }).then(async (children) => {
+            const firstTable = children.items.find(c => c.structureFamily === 'table');
+            if (firstTable) {
+              return fetchTableData(firstTable.path);
+            }
+            return null;
+          })
+        ]).then(([reconstructionPath, tableData]) => {
+          if (reconstructionPath) {
+            setArrayPath(reconstructionPath);
+          }
+          if (tableData) {
+            setSegmentationTableData(tableData);
+          }
+        }).finally(() => setIsDiscovering(false));
+      } else {
+        setIsDiscovering(false);
+      }
       return;
     }
 
@@ -177,6 +213,7 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
     start_doc?: Record<string, unknown>;
     precomputed_blobs?: Record<string, unknown>;
     groups?: Record<string, unknown>;
+    blob_detection_method?: string;
   };
 
   const hasViewableArray = arrayPath !== null;
@@ -255,6 +292,7 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
                         showScalebar={false}
                         showColorbar={false}
                         numSlices={numSlices}
+                        segmentationRows={segmentationTableData}
                       />
                       <div className="flex gap-2">
                         <SvgExportButton path={arrayPath} filename={`${metadata.scan_id || item.id}.svg`} />
@@ -321,6 +359,27 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
                       <ElementBadge key={element} element={element} />
                     ))}
                   </div>
+                </motion.div>
+              )}
+
+              {/* Segmentation Info */}
+              {item.path.includes('synaps/segmentations') && segmentationTableData && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.22 }}
+                >
+                  <CollapsibleSection title="Segmentation Info" defaultOpen={true} icon={Activity}>
+                    <div className="divide-y divide-border-subtle">
+                      <MetadataItem label="Cells Detected" value={segmentationTableData.length} />
+                      {metadata.blob_detection_method && (
+                        <MetadataItem label="Detection Method" value={metadata.blob_detection_method as string} />
+                      )}
+                      {metadata.step_size && (
+                        <MetadataItem label="Step Size" value={`${metadata.step_size} µm`} />
+                      )}
+                    </div>
+                  </CollapsibleSection>
                 </motion.div>
               )}
 

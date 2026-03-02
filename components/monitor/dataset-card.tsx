@@ -89,7 +89,18 @@ function getTypeConfig(structureFamily: string, specs?: string[]) {
 }
 
 // Get thumbnail config based on item type
-function getThumbnailConfig(path: string, elements: string[], structureFamily: string, specs?: string[]): { skip: boolean; subpath?: string; discoverArray?: boolean } {
+function getThumbnailConfig(
+  path: string,
+  elements: string[],
+  structureFamily: string,
+  specs?: string[],
+  item?: DatasetItem
+): {
+  skip: boolean;
+  subpath?: string;
+  discoverArray?: boolean;
+  findReconstructionByScanId?: string;
+} {
   // Skip thumbnails for BlueskyRun items (raw data) - they're containers without viewable arrays
   if (specs?.includes('BlueskyRun')) {
     return { skip: true };
@@ -101,8 +112,12 @@ function getThumbnailConfig(path: string, elements: string[], structureFamily: s
     }
     return { skip: false, discoverArray: true };
   }
-  // Segmentations: children are tables, not arrays - skip thumbnails
+  // Segmentations: link to corresponding reconstruction by scan_id
   if (path.includes('synaps/segmentations')) {
+    const match = item?.id.match(/automap_(\d+)_/);
+    if (match) {
+      return { skip: false, findReconstructionByScanId: match[1] };
+    }
     return { skip: true };
   }
   // Arrays can be fetched directly
@@ -136,10 +151,14 @@ export function DatasetCard({ item, onClick }: DatasetCardProps) {
   }
 
   // Get thumbnail with hardcoded subpath based on data type
-  const thumbnailConfig = getThumbnailConfig(item.path, elements, item.structureFamily, item.specs);
+  const thumbnailConfig = getThumbnailConfig(item.path, elements, item.structureFamily, item.specs, item);
   const { thumbnailUrl, isLoading: thumbnailLoading } = useTiledThumbnail(
     thumbnailConfig.skip ? null : item.path,
-    { subpath: thumbnailConfig.subpath, discoverArray: thumbnailConfig.discoverArray }
+    {
+      subpath: thumbnailConfig.subpath,
+      discoverArray: thumbnailConfig.discoverArray,
+      findReconstructionByScanId: thumbnailConfig.findReconstructionByScanId
+    }
   );
 
   // Count blobs

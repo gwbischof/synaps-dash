@@ -297,4 +297,39 @@ export async function fetchArrayData(path: string): Promise<number[][]> {
   return response.json();
 }
 
+// Fetch table data from tiled as JSON
+export async function fetchTableData(path: string): Promise<Record<string, unknown>[]> {
+  const url = `${API_BASE}/table/full/${path}?format=application/json`;
+  const response = await fetchWithAuth(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch table: ${response.status}`);
+  }
+  return response.json();
+}
+
+// Find a reconstruction array path by matching scan_id
+export async function findReconstructionByScanId(
+  segmentationPath: string,
+  scanId: string
+): Promise<string | null> {
+  // Convert path: synaps/segmentations/fxi/automap_123_xxx → synaps/reconstructions/fxi
+  const pathParts = segmentationPath.split('/');
+  const reconstructionsPath = pathParts.slice(0, -1).join('/').replace('/segmentations/', '/reconstructions/');
+
+  try {
+    const result = await listChildren(reconstructionsPath, { limit: 50 });
+    // Find reconstruction with matching scan_id prefix
+    const match = result.items.find(item => item.id.startsWith(`automap_${scanId}_`));
+    if (match) {
+      // Get first array child from this reconstruction
+      const children = await listChildren(match.path, { limit: 10 });
+      const firstArray = children.items.find(item => item.structureFamily === 'array');
+      return firstArray?.path || null;
+    }
+  } catch (e) {
+    console.warn('Failed to find reconstruction for scan', scanId, e);
+  }
+  return null;
+}
+
 export { TILED_URL };
