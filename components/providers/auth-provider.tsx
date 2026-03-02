@@ -12,7 +12,10 @@ import {
   getCurrentUser,
   refreshAccessToken,
   isTokenExpired,
+  isRefreshTokenExpired,
+  getTokenStatus,
 } from '@/lib/tiled/auth';
+import { onAuthError } from '@/lib/tiled/client';
 
 interface AuthState {
   user: TiledUser | null;
@@ -107,16 +110,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     checkAuth();
   }, [checkAuth]);
 
+  // Listen for auth errors from API calls (401 responses)
+  useEffect(() => {
+    const unsubscribe = onAuthError(() => {
+      console.log('[Auth] Auth error received, logging out');
+      setState({
+        user: null,
+        isAuthenticated: false,
+        isLoading: false,
+        accessToken: null,
+      });
+    });
+    return unsubscribe;
+  }, []);
+
   // Refresh token proactively and when tab becomes visible
   useEffect(() => {
     if (!state.isAuthenticated) return;
     if (getAuthType() === 'apikey') return; // API keys don't expire
 
-    const refresh = async () => {
-      if (isTokenExpired()) {
+    // Always try to refresh - don't wait for expiry since refresh tokens may also be short-lived
+    const refresh = async (force = false) => {
+      const status = getTokenStatus();
+      console.log('[Auth] Token status:', {
+        accessExpiresIn: `${status.accessExpiresIn}s (${Math.round(status.accessExpiresIn / 60)}min)`,
+        refreshExpiresIn: `${status.refreshExpiresIn}s (${Math.round(status.refreshExpiresIn / 60)}min)`,
+        accessExpired: status.accessExpired,
+        refreshExpired: status.refreshExpired,
+      });
+
+      // If refresh token is expired, no point trying
+      if (status.refreshExpired) {
+        console.log('[Auth] Refresh token expired, cannot refresh');
+        return;
+      }
+
+      if (force || status.accessExpired) {
+        console.log('[Auth] Refreshing token...', { force });
         const refreshed = await refreshAccessToken();
         if (refreshed) {
+          console.log('[Auth] Token refreshed successfully');
           checkAuth();
+        } else {
+          console.log('[Auth] Token refresh failed');
         }
       }
     };
@@ -124,7 +160,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Handle visibility change - refresh when tab becomes visible
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        refresh();
+        console.log('[Auth] Tab visible, checking token...');
+        refresh(true); // Force refresh when coming back to tab
       }
     };
 
@@ -136,9 +173,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('focus', handleFocus);
 
-    // Also keep interval as backup (browsers may throttle but it still helps)
-    // Refresh every 4 minutes (tokens expire in 15 min, we mark expired at 13 min)
-    const interval = setInterval(refresh, 4 * 60 * 1000);
+    // Refresh more aggressively - every 2 minutes to stay ahead of short-lived tokens
+    const interval = setInterval(() => refresh(), 2 * 60 * 1000);
+
+    // Also refresh immediately on mount to ensure fresh token
+    refresh();
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { fetchThumbnail } from '@/lib/tiled/client';
 
 // Viridis colormap stops for colorbar SVG
@@ -147,6 +147,8 @@ interface ArrayViewerProps {
   showColorbar?: boolean;
   scalebarUnit?: 'µm' | 'nm';
   colormap?: 'viridis' | 'grayscale';
+  // For 3D arrays: total number of slices
+  numSlices?: number;
 }
 
 // Color palette for different groups - cosmic theme
@@ -300,11 +302,13 @@ export function ArrayViewer({
   showColorbar = true,
   scalebarUnit = 'µm',
   colormap = 'viridis',
+  numSlices,
 }: ArrayViewerProps) {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [currentSlice, setCurrentSlice] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
 
@@ -324,8 +328,8 @@ export function ArrayViewer({
       setError(null);
 
       try {
-        // Fetch grayscale image from Tiled
-        const grayscaleUrl = await fetchThumbnail(path);
+        // Fetch grayscale image from Tiled with current slice
+        const grayscaleUrl = await fetchThumbnail(path, 'viridis', currentSlice);
         if (cancelled || !grayscaleUrl) return;
 
         // Apply colormap if requested
@@ -352,7 +356,7 @@ export function ArrayViewer({
       cancelled = true;
       if (currentUrl) URL.revokeObjectURL(currentUrl);
     };
-  }, [path, colormap]);
+  }, [path, colormap, currentSlice]);
 
   // Track container width for scaling
   useEffect(() => {
@@ -510,34 +514,44 @@ export function ArrayViewer({
                 </g>
               )}
 
-              {/* Title - top left */}
-              {(element || scanId) && (
-                <g>
-                  <rect
-                    x={8}
-                    y={8}
-                    width={Math.max((element?.length || 0) * 10 + (scanId ? 80 : 0), 60)}
-                    height={24}
-                    fill="rgba(0, 0, 0, 0.6)"
-                    rx={4}
-                  />
-                  <text
-                    x={16}
-                    y={25}
-                    fill="white"
-                    fontSize={14}
-                    fontFamily="ui-sans-serif, system-ui, sans-serif"
-                    fontWeight="600"
-                  >
-                    {element}{element && scanId ? ' - ' : ''}{scanId ? `Scan ${scanId}` : ''}
-                  </text>
-                </g>
-              )}
             </svg>
           )}
 
           {/* Subtle gradient overlay */}
           <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-surface-ground/30 via-transparent to-transparent" />
+
+          {/* Slice slider for 3D arrays */}
+          {numSlices && numSlices > 1 && (
+            <div className="absolute bottom-2 left-2 right-2 px-3 py-2 rounded-md bg-surface-ground/90 backdrop-blur-sm border border-border-subtle">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentSlice(Math.max(0, currentSlice - 1))}
+                  disabled={currentSlice === 0}
+                  className="p-1 rounded hover:bg-surface-raised disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronLeft className="w-4 h-4 text-text-secondary" />
+                </button>
+                <span className="text-xs text-text-secondary font-mono whitespace-nowrap min-w-[70px] text-center">
+                  {currentSlice + 1} / {numSlices}
+                </span>
+                <button
+                  onClick={() => setCurrentSlice(Math.min(numSlices - 1, currentSlice + 1))}
+                  disabled={currentSlice === numSlices - 1}
+                  className="p-1 rounded hover:bg-surface-raised disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronRight className="w-4 h-4 text-text-secondary" />
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={numSlices - 1}
+                  value={currentSlice}
+                  onChange={(e) => setCurrentSlice(parseInt(e.target.value))}
+                  className="flex-1 h-1 bg-border-medium rounded-lg appearance-none cursor-pointer accent-beam"
+                />
+              </div>
+            </div>
+          )}
 
           {/* Legend and count indicator */}
           {boundingBoxes.length > 0 && (

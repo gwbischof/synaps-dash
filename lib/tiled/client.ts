@@ -1,5 +1,5 @@
 import { TiledSearchResponse, TiledNode, DatasetItem } from './types';
-import { getAuthHeader } from './auth';
+import { getAuthHeader, getValidAccessToken, getAuthType, clearTokens } from './auth';
 
 // Use local API proxy to avoid CORS issues
 const API_BASE = '/api/tiled';
@@ -7,15 +7,59 @@ const API_BASE = '/api/tiled';
 // Keep original URL for reference/WebSocket
 const TILED_URL = process.env.NEXT_PUBLIC_TILED_URL || 'https://tiled.nsls2.bnl.gov';
 
-async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
-  const authHeader = getAuthHeader();
+// Event emitter for auth errors - allows components to react to 401s
+type AuthErrorListener = () => void;
+const authErrorListeners: Set<AuthErrorListener> = new Set();
+
+export function onAuthError(listener: AuthErrorListener): () => void {
+  authErrorListeners.add(listener);
+  return () => authErrorListeners.delete(listener);
+}
+
+function notifyAuthError(): void {
+  authErrorListeners.forEach(listener => listener());
+}
+
+// Get a valid auth header, refreshing token if needed
+async function getValidAuthHeader(): Promise<string | null> {
+  const token = await getValidAccessToken();
+  if (!token) {
+    console.log('[Client] No valid token available');
+    return null;
+  }
+
+  const authType = getAuthType();
+  return authType === 'apikey' ? `Apikey ${token}` : `Bearer ${token}`;
+}
+
+async function fetchWithAuth(url: string, options: RequestInit = {}, isRetry = false): Promise<Response> {
+  const authHeader = await getValidAuthHeader();
 
   const headers = new Headers(options.headers);
   if (authHeader) {
     headers.set('Authorization', authHeader);
   }
 
-  return fetch(url, { ...options, headers });
+  const response = await fetch(url, { ...options, headers });
+
+  // On 401, try to refresh and retry once
+  if (response.status === 401 && !isRetry) {
+    console.log('[Client] Got 401, attempting token refresh and retry...');
+    const { refreshAccessToken } = await import('./auth');
+    const refreshed = await refreshAccessToken();
+
+    if (refreshed) {
+      console.log('[Client] Token refreshed, retrying request...');
+      return fetchWithAuth(url, options, true);
+    }
+
+    // Refresh failed - clear tokens and notify
+    console.log('[Client] Token refresh failed, logging out');
+    clearTokens();
+    notifyAuthError();
+  }
+
+  return response;
 }
 
 export interface ListChildrenOptions {
@@ -60,10 +104,14 @@ export async function listChildren(
 ): Promise<{ items: DatasetItem[]; hasMore: boolean; totalCount: number }> {
   // Determine appropriate sort based on path
   // - "raw" collections (databroker) use scan_id
-  // - Other collections (tiled-native) use "_" for default ordering
-  const isRawCollection = path.includes('/raw');
-  const defaultSort = isRawCollection ? '-scan_id' : '-_';
-  const { offset = 0, limit = 20, sort = defaultSort, fullText, filters } = options;
+  // - synaps reconstructions/segmentations use time_created
+  // - Other collections use "_" for default ordering
+  const getDefaultSort = (p: string): string => {
+    if (p.includes('/raw')) return '-scan_id';
+    if (p.includes('synaps/reconstructions') || p.includes('synaps/segmentations')) return '-time_created';
+    return '-_';
+  };
+  const { offset = 0, limit = 20, sort = getDefaultSort(path), fullText, filters } = options;
 
   const url = new URL(`${API_BASE}/search/${path}`, window.location.origin);
   url.searchParams.set('page[offset]', offset.toString());
@@ -177,8 +225,8 @@ export async function getMetadata(path: string): Promise<Record<string, unknown>
   return data.attributes.metadata;
 }
 
-export function getThumbnailUrl(path: string, cmap: string = 'viridis'): string {
-  return `${API_BASE}/array/full/${path}?format=image/png&cmap=${cmap}`;
+export function getThumbnailUrl(path: string, cmap: string = 'viridis', slice: number = 0): string {
+  return `${API_BASE}/array/full/${path}?format=image/png&cmap=${cmap}&slice=${slice}`;
 }
 
 export function getPngUrl(path: string, cmap: string = 'viridis'): string {
@@ -189,10 +237,10 @@ export function getArrayFullUrl(path: string, format: string = 'image/png', cmap
   return `${API_BASE}/array/full/${path}?format=${encodeURIComponent(format)}&cmap=${cmap}`;
 }
 
-export async function fetchThumbnail(path: string, cmap: string = 'viridis'): Promise<string | null> {
+export async function fetchThumbnail(path: string, cmap: string = 'viridis', slice: number = 0): Promise<string | null> {
   try {
-    const authHeader = getAuthHeader();
-    const url = getThumbnailUrl(path, cmap);
+    const authHeader = await getValidAuthHeader();
+    const url = getThumbnailUrl(path, cmap, slice);
 
     const response = await fetch(url, {
       headers: authHeader ? { Authorization: authHeader } : {},
@@ -208,7 +256,7 @@ export async function fetchThumbnail(path: string, cmap: string = 'viridis'): Pr
 }
 
 export async function downloadImage(path: string, filename: string): Promise<void> {
-  const authHeader = getAuthHeader();
+  const authHeader = await getValidAuthHeader();
   const url = getPngUrl(path);
 
   const response = await fetch(url, {

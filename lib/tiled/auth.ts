@@ -3,6 +3,7 @@ import { TokenResponse, TiledUser } from './types';
 const TOKEN_KEY = 'tiled_access_token';
 const REFRESH_TOKEN_KEY = 'tiled_refresh_token';
 const TOKEN_EXPIRY_KEY = 'tiled_token_expiry';
+const REFRESH_TOKEN_EXPIRY_KEY = 'tiled_refresh_token_expiry';
 const API_KEY_KEY = 'tiled_api_key';
 const AUTH_TYPE_KEY = 'tiled_auth_type';
 
@@ -39,6 +40,16 @@ export function storeTokens(response: TokenResponse): void {
   localStorage.setItem(TOKEN_EXPIRY_KEY, expiresAt.toString());
   localStorage.setItem(AUTH_TYPE_KEY, 'token');
   localStorage.removeItem(API_KEY_KEY);
+
+  // Store refresh token expiry if provided
+  if (response.refresh_token_expires_in) {
+    const refreshExpiresAt = Date.now() + response.refresh_token_expires_in * 1000;
+    localStorage.setItem(REFRESH_TOKEN_EXPIRY_KEY, refreshExpiresAt.toString());
+    console.log('[Auth] Token lifetimes:', {
+      access_token_expires_in: `${response.expires_in}s (${Math.round(response.expires_in / 60)}min)`,
+      refresh_token_expires_in: `${response.refresh_token_expires_in}s (${Math.round(response.refresh_token_expires_in / 60)}min)`,
+    });
+  }
 }
 
 export function storeApiKey(apiKey: string): void {
@@ -57,16 +68,51 @@ export function clearTokens(): void {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem(TOKEN_EXPIRY_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_EXPIRY_KEY);
   localStorage.removeItem(API_KEY_KEY);
   localStorage.removeItem(AUTH_TYPE_KEY);
 }
 
 export function isTokenExpired(): boolean {
   const { expiresAt } = getStoredTokens();
-  if (!expiresAt) return true;
-  // Consider expired 2 minutes before actual expiry to allow time for refresh
-  // (Token lifetime is only 15 minutes, so we can't use a large buffer)
-  return Date.now() > expiresAt - 2 * 60 * 1000;
+  if (!expiresAt) {
+    console.log('[Auth] isTokenExpired: No expiry stored, considering expired');
+    return true;
+  }
+  const now = Date.now();
+  const buffer = 5 * 60 * 1000; // 5 minutes buffer
+  const expired = now > expiresAt - buffer;
+  const timeLeft = Math.round((expiresAt - now) / 1000);
+
+  if (expired) {
+    console.log(`[Auth] isTokenExpired: YES (${timeLeft}s until actual expiry)`);
+  }
+
+  return expired;
+}
+
+export function isRefreshTokenExpired(): boolean {
+  if (typeof window === 'undefined') return true;
+  const refreshExpiresAt = localStorage.getItem(REFRESH_TOKEN_EXPIRY_KEY);
+  if (!refreshExpiresAt) return false; // If we don't know, assume it's valid
+  // Consider expired 1 minute before actual expiry
+  return Date.now() > parseInt(refreshExpiresAt) - 60 * 1000;
+}
+
+export function getTokenStatus(): { accessExpired: boolean; refreshExpired: boolean; accessExpiresIn: number; refreshExpiresIn: number } {
+  const { expiresAt } = getStoredTokens();
+  const refreshExpiresAt = localStorage.getItem(REFRESH_TOKEN_EXPIRY_KEY);
+
+  const now = Date.now();
+  const accessExpiresIn = expiresAt ? Math.round((expiresAt - now) / 1000) : 0;
+  const refreshExpiresIn = refreshExpiresAt ? Math.round((parseInt(refreshExpiresAt) - now) / 1000) : 0;
+
+  return {
+    accessExpired: isTokenExpired(),
+    refreshExpired: isRefreshTokenExpired(),
+    accessExpiresIn,
+    refreshExpiresIn,
+  };
 }
 
 export async function loginWithPassword(username: string, password: string): Promise<TokenResponse> {
@@ -121,6 +167,7 @@ export async function refreshAccessToken(): Promise<TokenResponse | null> {
 
   refreshPromise = (async () => {
     try {
+      console.log('[Auth] Calling refresh endpoint...');
       const response = await fetch('/api/auth/refresh', {
         method: 'POST',
         headers: {
@@ -131,20 +178,45 @@ export async function refreshAccessToken(): Promise<TokenResponse | null> {
 
       if (response.ok) {
         const data: TokenResponse = await response.json();
+        console.log('[Auth] Refresh response:', {
+          has_access_token: !!data.access_token,
+          has_refresh_token: !!data.refresh_token,
+          expires_in: data.expires_in,
+          token_type: data.token_type,
+        });
+
+        // Some servers don't return a new refresh_token - keep the old one
+        if (!data.refresh_token) {
+          const { refreshToken: oldRefreshToken } = getStoredTokens();
+          if (oldRefreshToken) {
+            data.refresh_token = oldRefreshToken;
+            console.log('[Auth] Keeping existing refresh token');
+          }
+        }
+
         storeTokens(data);
         return data;
       }
 
+      // Log the error response
+      const errorText = await response.text().catch(() => 'Could not read error');
+      console.log('[Auth] Refresh failed:', {
+        status: response.status,
+        error: errorText,
+      });
+
       // Clear tokens on auth errors (401/403/422 = invalid/expired refresh token)
       if (response.status === 401 || response.status === 403 || response.status === 422) {
+        console.log('[Auth] Clearing tokens due to auth error');
         clearTokens();
         return null;
       }
 
       // Other errors - don't clear tokens, might be temporary
       return null;
-    } catch {
+    } catch (err) {
       // Network error - don't clear tokens
+      console.log('[Auth] Refresh network error:', err);
       return null;
     } finally {
       refreshPromise = null;
@@ -194,11 +266,20 @@ export async function getValidAccessToken(): Promise<string | null> {
   // Token-based auth
   const { accessToken } = getStoredTokens();
 
-  if (!accessToken) return null;
+  if (!accessToken) {
+    console.log('[Auth] getValidAccessToken: No access token stored');
+    return null;
+  }
 
   if (isTokenExpired()) {
+    console.log('[Auth] getValidAccessToken: Token expired, refreshing...');
     const refreshed = await refreshAccessToken();
-    return refreshed?.access_token || null;
+    if (!refreshed) {
+      console.log('[Auth] getValidAccessToken: Refresh failed');
+      return null;
+    }
+    console.log('[Auth] getValidAccessToken: Refresh succeeded');
+    return refreshed.access_token;
   }
 
   return accessToken;

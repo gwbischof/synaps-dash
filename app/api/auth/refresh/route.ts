@@ -9,11 +9,9 @@ export async function POST(request: NextRequest) {
     const response = await fetch(`${TILED_URL}/api/v1/auth/session/refresh`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Type': 'application/json',
       },
-      body: new URLSearchParams({
-        refresh_token,
-      }),
+      body: JSON.stringify({ refresh_token }),
     });
 
     if (!response.ok) {

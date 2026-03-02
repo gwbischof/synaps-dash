@@ -88,11 +88,32 @@ function getTypeConfig(structureFamily: string, specs?: string[]) {
   return TYPE_CONFIG[structureFamily] || TYPE_CONFIG.array;
 }
 
-export function DatasetCard({ item, onClick }: DatasetCardProps) {
-  const { thumbnailUrl, isLoading: thumbnailLoading } = useTiledThumbnail(
-    item.structureFamily === 'array' ? item.path : null
-  );
+// Get thumbnail config based on item type
+function getThumbnailConfig(path: string, elements: string[], structureFamily: string, specs?: string[]): { skip: boolean; subpath?: string; discoverArray?: boolean } {
+  // Skip thumbnails for BlueskyRun items (raw data) - they're containers without viewable arrays
+  if (specs?.includes('BlueskyRun')) {
+    return { skip: true };
+  }
+  // Reconstructions: use first element if available, otherwise discover
+  if (path.includes('synaps/reconstructions')) {
+    if (elements.length > 0) {
+      return { skip: false, subpath: elements[0] };
+    }
+    return { skip: false, discoverArray: true };
+  }
+  // Segmentations: children are tables, not arrays - skip thumbnails
+  if (path.includes('synaps/segmentations')) {
+    return { skip: true };
+  }
+  // Arrays can be fetched directly
+  if (structureFamily === 'array') {
+    return { skip: false };
+  }
+  // Skip other containers
+  return { skip: true };
+}
 
+export function DatasetCard({ item, onClick }: DatasetCardProps) {
   const metadata = item.metadata as Record<string, unknown> & {
     element_list?: string[];
     step_size?: number;
@@ -113,6 +134,13 @@ export function DatasetCard({ item, onClick }: DatasetCardProps) {
   if (!elements.length && metadata.precomputed_blobs) {
     elements = Object.keys(metadata.precomputed_blobs);
   }
+
+  // Get thumbnail with hardcoded subpath based on data type
+  const thumbnailConfig = getThumbnailConfig(item.path, elements, item.structureFamily, item.specs);
+  const { thumbnailUrl, isLoading: thumbnailLoading } = useTiledThumbnail(
+    thumbnailConfig.skip ? null : item.path,
+    { subpath: thumbnailConfig.subpath, discoverArray: thumbnailConfig.discoverArray }
+  );
 
   // Count blobs
   let blobCount = 0;
