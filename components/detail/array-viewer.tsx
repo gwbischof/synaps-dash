@@ -284,6 +284,8 @@ function extractBoundingBoxes(
 
   // Method 3: Add boxes from external segmentation table data
   if (segmentationRows && segmentationRows.length > 0) {
+    console.log('[extractBoundingBoxes] segmentationRows:', segmentationRows);
+    console.log('[extractBoundingBoxes] metadata:', { stepSize, xStart, yStart });
     const color = GROUP_COLORS[colorIndex % GROUP_COLORS.length];
     for (const row of segmentationRows) {
       const cx = row.cx as number;
@@ -294,6 +296,7 @@ function extractBoundingBoxes(
         const size = ((numX + numY) / 2) / stepSize;
         const x = (cx - xStart) / stepSize - size / 2;
         const y = (cy - yStart) / stepSize - size / 2;
+        console.log('[extractBoundingBoxes] box:', { cx, cy, numX, numY, x, y, size });
         boxes.push({
           name: (row.label as string) || `Cell ${boxes.length + 1}`,
           x,

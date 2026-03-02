@@ -112,13 +112,9 @@ function getThumbnailConfig(
     }
     return { skip: false, discoverArray: true };
   }
-  // Segmentations: link to corresponding reconstruction by scan_id
+  // Segmentations: discover array child within segmentation container
   if (path.includes('synaps/segmentations')) {
-    const match = item?.id.match(/automap_(\d+)_/);
-    if (match) {
-      return { skip: false, findReconstructionByScanId: match[1] };
-    }
-    return { skip: true };
+    return { skip: false, discoverArray: true };
   }
   // Arrays can be fetched directly
   if (structureFamily === 'array') {

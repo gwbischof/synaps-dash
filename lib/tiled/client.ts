@@ -297,14 +297,19 @@ export async function fetchArrayData(path: string): Promise<number[][]> {
   return response.json();
 }
 
-// Fetch table data from tiled as JSON
+// Fetch table data from tiled as JSON (converts columnar to row format)
 export async function fetchTableData(path: string): Promise<Record<string, unknown>[]> {
   const url = `${API_BASE}/table/full/${path}?format=application/json`;
   const response = await fetchWithAuth(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch table: ${response.status}`);
   }
-  return response.json();
+  const data = await response.json();
+  // Tiled returns columnar format {col1: [...], col2: [...]} - convert to rows
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    return columnarToRows(data as Record<string, unknown[]>);
+  }
+  return data;
 }
 
 // Find a reconstruction array path by matching scan_id
@@ -312,9 +317,9 @@ export async function findReconstructionByScanId(
   segmentationPath: string,
   scanId: string
 ): Promise<string | null> {
-  // Convert path: synaps/segmentations/fxi/automap_123_xxx → synaps/reconstructions/fxi
+  // Convert path: .../synaps/segmentations/automap_123_xxx → .../synaps/reconstructions
   const pathParts = segmentationPath.split('/');
-  const reconstructionsPath = pathParts.slice(0, -1).join('/').replace('/segmentations/', '/reconstructions/');
+  const reconstructionsPath = pathParts.slice(0, -1).join('/').replace('segmentations', 'reconstructions');
 
   try {
     const result = await listChildren(reconstructionsPath, { limit: 50 });
@@ -330,6 +335,24 @@ export async function findReconstructionByScanId(
     console.warn('Failed to find reconstruction for scan', scanId, e);
   }
   return null;
+}
+
+// Convert columnar table data to row format
+function columnarToRows(data: Record<string, unknown[]>): Record<string, unknown>[] {
+  const keys = Object.keys(data);
+  if (keys.length === 0) return [];
+
+  const length = (data[keys[0]] as unknown[]).length;
+  const rows: Record<string, unknown>[] = [];
+
+  for (let i = 0; i < length; i++) {
+    const row: Record<string, unknown> = {};
+    for (const key of keys) {
+      row[key] = (data[key] as unknown[])[i];
+    }
+    rows.push(row);
+  }
+  return rows;
 }
 
 export { TILED_URL };

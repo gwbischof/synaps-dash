@@ -157,6 +157,7 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
       setArrayShape(null);
 
       const scanIdMatch = item.id.match(/automap_(\d+)_/);
+
       if (scanIdMatch) {
         Promise.all([
           findReconstructionByScanId(item.path, scanIdMatch[1]),
@@ -175,6 +176,8 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
           if (tableData) {
             setSegmentationTableData(tableData);
           }
+        }).catch(err => {
+          console.error('[DetailPanel] Error fetching segmentation data:', err);
         }).finally(() => setIsDiscovering(false));
       } else {
         setIsDiscovering(false);
