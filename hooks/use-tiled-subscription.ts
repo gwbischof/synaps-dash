@@ -150,9 +150,10 @@ export function useInfiniteScrollWithWebSocket(
     pageSize?: number;
     sort?: string;
     enabled?: boolean;
+    fullText?: string;
   } = {}
 ) {
-  const { pageSize = 20, sort = '-time_created', enabled = true } = options;
+  const { pageSize = 20, sort = '-time_created', enabled = true, fullText } = options;
 
   const [items, setItems] = useState<DatasetItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -173,6 +174,7 @@ export function useInfiniteScrollWithWebSocket(
         offset: loadOffset,
         limit: pageSize,
         sort,
+        fullText: fullText || undefined,
       });
 
       if (loadOffset === 0) {
@@ -189,14 +191,18 @@ export function useInfiniteScrollWithWebSocket(
       setIsLoading(false);
       setIsInitialLoad(false);
     }
-  }, [path, pageSize, sort, enabled]);
+  }, [path, pageSize, sort, enabled, fullText]);
 
-  // Initial load
+  // Initial load and reload on search change
   useEffect(() => {
     if (enabled && path) {
+      setItems([]);
+      setOffset(0);
+      setHasMore(true);
+      setIsInitialLoad(true);
       loadItems(0);
     }
-  }, [enabled, path, loadItems]);
+  }, [enabled, path, fullText]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadMore = useCallback(() => {
     if (!isLoading && hasMore) {

@@ -1,14 +1,16 @@
 'use client';
 
-import { useRef, useCallback, useState } from 'react';
+import { useRef, useCallback, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Wifi, WifiOff, Loader2, ChevronUp } from 'lucide-react';
+import { X, Wifi, WifiOff, Loader2, ChevronUp, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { DatasetCard } from './dataset-card';
 import { useInfiniteScrollWithWebSocket } from '@/hooks/use-tiled-subscription';
 import { DatasetItem } from '@/lib/tiled/types';
 import { cn } from '@/lib/utils';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 
 interface MonitorColumnProps {
   id: string;
@@ -28,6 +30,8 @@ export function MonitorColumn({
   const viewportRef = useRef<HTMLDivElement>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const [showBackToTop, setShowBackToTop] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebouncedValue(searchQuery, 300);
 
   const {
     items,
@@ -38,7 +42,7 @@ export function MonitorColumn({
     loadMore,
     isConnected,
     mode,
-  } = useInfiniteScrollWithWebSocket(path);
+  } = useInfiniteScrollWithWebSocket(path, { fullText: debouncedSearch });
 
   const lastItemRef = useCallback(
     (node: HTMLDivElement | null) => {
@@ -75,28 +79,49 @@ export function MonitorColumn({
       className="flex flex-col w-80 h-full flex-shrink-0 glass-card rounded-2xl overflow-hidden"
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle">
-        <div className="flex-1 min-w-0 mr-3">
-          <div className="flex items-center gap-2 mb-0.5">
-            <h3 className="text-sm font-semibold text-text-primary truncate">
-              {label}
-            </h3>
-            {isConnected ? (
-              <Wifi className="w-3 h-3 text-live flex-shrink-0" />
-            ) : (
-              <WifiOff className="w-3 h-3 text-text-tertiary flex-shrink-0" />
-            )}
+      <div className="px-4 py-3 border-b border-border-subtle space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex-1 min-w-0 mr-3">
+            <div className="flex items-center gap-2 mb-0.5">
+              <h3 className="text-sm font-semibold text-text-primary truncate">
+                {label}
+              </h3>
+              {isConnected ? (
+                <Wifi className="w-3 h-3 text-live flex-shrink-0" />
+              ) : (
+                <WifiOff className="w-3 h-3 text-text-tertiary flex-shrink-0" />
+              )}
+            </div>
+            <p className="text-[11px] text-text-tertiary font-mono truncate">{path}</p>
           </div>
-          <p className="text-[11px] text-text-tertiary font-mono truncate">{path}</p>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onRemove}
+            className="h-7 w-7 text-text-tertiary hover:text-error hover:bg-error/10 rounded-lg flex-shrink-0"
+          >
+            <X className="h-4 w-4" />
+          </Button>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onRemove}
-          className="h-7 w-7 text-text-tertiary hover:text-error hover:bg-error/10 rounded-lg flex-shrink-0"
-        >
-          <X className="h-4 w-4" />
-        </Button>
+        {/* Search bar */}
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-tertiary" />
+          <Input
+            type="text"
+            placeholder="Search..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="h-8 pl-8 pr-3 text-xs bg-surface-ground border-border-subtle placeholder:text-text-tertiary focus:border-beam focus:ring-1 focus:ring-beam/20"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-secondary"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Back to Top */}
@@ -131,10 +156,21 @@ export function MonitorColumn({
         ) : items.length === 0 ? (
           <div className="flex items-center justify-center h-full p-6">
             <div className="text-center">
-              <p className="text-text-secondary text-sm mb-1">No datasets yet</p>
-              <p className="text-text-tertiary text-xs">
-                Waiting for new data...
-              </p>
+              {debouncedSearch ? (
+                <>
+                  <p className="text-text-secondary text-sm mb-1">No results found</p>
+                  <p className="text-text-tertiary text-xs">
+                    Try a different search term
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-text-secondary text-sm mb-1">No datasets yet</p>
+                  <p className="text-text-tertiary text-xs">
+                    Waiting for new data...
+                  </p>
+                </>
+              )}
             </div>
           </div>
         ) : (
@@ -177,7 +213,9 @@ export function MonitorColumn({
       {/* Footer */}
       <div className="px-4 py-2.5 border-t border-border-subtle bg-surface-ground/50">
         <div className="flex items-center justify-between text-[11px]">
-          <span className="text-text-tertiary font-mono">{items.length} items</span>
+          <span className="text-text-tertiary font-mono">
+            {items.length} {debouncedSearch ? 'results' : 'items'}
+          </span>
           <span className={cn(
             'flex items-center gap-1.5',
             isConnected ? 'text-live' : 'text-text-tertiary'

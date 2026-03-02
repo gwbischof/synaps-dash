@@ -22,13 +22,15 @@ export interface ListChildrenOptions {
   offset?: number;
   limit?: number;
   sort?: string;
+  fullText?: string;
+  filters?: Record<string, string>;
 }
 
 export async function listChildren(
   path: string,
   options: ListChildrenOptions = {}
 ): Promise<{ items: DatasetItem[]; hasMore: boolean; totalCount: number }> {
-  const { offset = 0, limit = 20, sort = '-time_created' } = options;
+  const { offset = 0, limit = 20, sort = '-time_created', fullText, filters } = options;
 
   // Try sort options in order of preference
   const sortOptions = sort ? [sort, '-scan_id', ''] : [''];
@@ -41,6 +43,18 @@ export async function listChildren(
     url.searchParams.set('page[limit]', limit.toString());
     if (sortOption) {
       url.searchParams.set('sort', sortOption);
+    }
+
+    // Add FullText search if provided
+    if (fullText && fullText.trim()) {
+      url.searchParams.set('filter[fulltext][condition][text]', fullText.trim());
+    }
+
+    // Add additional filters if provided
+    if (filters) {
+      for (const [key, value] of Object.entries(filters)) {
+        url.searchParams.set(key, value);
+      }
     }
 
     response = await fetchWithAuth(url.toString());
@@ -136,22 +150,22 @@ export async function getMetadata(path: string): Promise<Record<string, unknown>
   return data.attributes.metadata;
 }
 
-export function getThumbnailUrl(path: string): string {
-  return `${API_BASE}/array/full/${path}?format=image/png`;
+export function getThumbnailUrl(path: string, cmap: string = 'viridis'): string {
+  return `${API_BASE}/array/full/${path}?format=image/png&cmap=${cmap}`;
 }
 
-export function getPngUrl(path: string): string {
-  return `${API_BASE}/array/full/${path}?format=image/png`;
+export function getPngUrl(path: string, cmap: string = 'viridis'): string {
+  return `${API_BASE}/array/full/${path}?format=image/png&cmap=${cmap}`;
 }
 
-export function getArrayFullUrl(path: string, format: string = 'image/png'): string {
-  return `${API_BASE}/array/full/${path}?format=${encodeURIComponent(format)}`;
+export function getArrayFullUrl(path: string, format: string = 'image/png', cmap: string = 'viridis'): string {
+  return `${API_BASE}/array/full/${path}?format=${encodeURIComponent(format)}&cmap=${cmap}`;
 }
 
-export async function fetchThumbnail(path: string): Promise<string | null> {
+export async function fetchThumbnail(path: string, cmap: string = 'viridis'): Promise<string | null> {
   try {
     const authHeader = getAuthHeader();
-    const url = getThumbnailUrl(path);
+    const url = getThumbnailUrl(path, cmap);
 
     const response = await fetch(url, {
       headers: authHeader ? { Authorization: authHeader } : {},

@@ -2,6 +2,14 @@ import { WebSocket as NodeWebSocket } from 'ws';
 
 const TILED_URL = process.env.NEXT_PUBLIC_TILED_URL || 'https://tiled.nsls2.bnl.gov';
 
+// Mark this route as using WebSocket handler
+export const dynamic = 'force-dynamic';
+
+// Standard HTTP handler - WebSocket routes still need this for Next.js 16
+export async function GET() {
+  return new Response('WebSocket endpoint - upgrade connection to use', { status: 426 });
+}
+
 // Cache API keys by access token to avoid hitting the 100 key limit
 const apiKeyCache = new Map<string, { key: string; expiresAt: number }>();
 
