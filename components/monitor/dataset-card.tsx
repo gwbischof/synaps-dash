@@ -60,27 +60,27 @@ function findTimestamp(metadata: Record<string, unknown>, itemTimeCreated?: stri
   return undefined;
 }
 
-// Element colors - warm, organic palette
+// Element colors - cosmic palette
 const ELEMENT_COLORS: Record<string, string> = {
-  Fe: '#e9a84a',
-  Cu: '#5cd189',
-  Ni: '#9d8df2',
-  Zn: '#5b9cf4',
-  Au: '#e9a84a',
-  Ca: '#d4737a',
-  K: '#e085d2',
-  S: '#85d4e0',
-  P: '#e0c285',
-  Cl: '#85e0a3',
+  Fe: '#fbbf24', // Gold - like a star
+  Cu: '#4ade80', // Green - life
+  Ni: '#a78bfa', // Purple - nebula
+  Zn: '#60a5fa', // Blue - stellar
+  Au: '#fbbf24', // Gold
+  Ca: '#f472b6', // Pink - nova
+  K: '#c084fc',  // Violet
+  S: '#2dd4bf',  // Teal - beam
+  P: '#fb923c',  // Orange
+  Cl: '#34d399', // Emerald
 };
 
-const getElementColor = (el: string) => ELEMENT_COLORS[el] || '#9d9a94';
+const getElementColor = (el: string) => ELEMENT_COLORS[el] || '#94a3b8';
 
 const TYPE_CONFIG: Record<string, { icon: typeof Layers; label: string; color: string }> = {
   container: { icon: Layers, label: 'DIR', color: 'text-beam' },
   array: { icon: Grid3X3, label: 'ARR', color: 'text-cell' },
-  table: { icon: Table, label: 'TBL', color: 'text-warning' },
-  BlueskyRun: { icon: Database, label: 'RUN', color: 'text-live' },
+  table: { icon: Table, label: 'TBL', color: 'text-data' },
+  BlueskyRun: { icon: Database, label: 'RUN', color: 'text-nebula' },
 };
 
 function getTypeConfig(structureFamily: string, specs?: string[]) {
@@ -146,9 +146,9 @@ export function DatasetCard({ item, onClick }: DatasetCardProps) {
           : 'border-border-subtle hover:border-border-medium'
       )}
     >
-      {/* New indicator */}
+      {/* New indicator - cosmic gradient */}
       {item.isNew && (
-        <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-beam via-cell to-beam" />
+        <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-beam via-nebula to-cell" />
       )}
 
       <div className="flex gap-3 p-3">
@@ -161,9 +161,9 @@ export function DatasetCard({ item, onClick }: DatasetCardProps) {
           ) : thumbnailUrl ? (
             <img src={thumbnailUrl} alt="" className="w-full h-full object-cover" />
           ) : (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5">
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 bg-gradient-to-br from-surface-raised to-surface-ground">
               <TypeIcon className={cn('w-4 h-4', typeConfig.color)} />
-              <span className={cn('text-[8px] font-mono', typeConfig.color)}>{typeConfig.label}</span>
+              <span className={cn('text-[8px] font-mono font-semibold', typeConfig.color)}>{typeConfig.label}</span>
             </div>
           )}
 
@@ -203,9 +203,9 @@ export function DatasetCard({ item, onClick }: DatasetCardProps) {
                   key={el}
                   className="px-1.5 py-0.5 text-[9px] font-mono font-medium rounded"
                   style={{
-                    backgroundColor: `${getElementColor(el)}15`,
+                    backgroundColor: `${getElementColor(el)}18`,
                     color: getElementColor(el),
-                    border: `1px solid ${getElementColor(el)}30`,
+                    border: `1px solid ${getElementColor(el)}35`,
                   }}
                 >
                   {el}
@@ -221,13 +221,13 @@ export function DatasetCard({ item, onClick }: DatasetCardProps) {
           <div className="flex items-center gap-3 mt-1.5 flex-wrap">
             {blobCount > 0 && (
               <span className="flex items-center gap-1 text-[10px]">
-                <Activity className="w-3 h-3 text-cell" />
+                <Activity className="w-3 h-3 text-nova" />
                 <span className="text-text-secondary">{blobCount}</span>
               </span>
             )}
             {groupCount > 0 && (
               <span className="flex items-center gap-1 text-[10px]">
-                <Layers className="w-3 h-3 text-data" />
+                <Layers className="w-3 h-3 text-cell" />
                 <span className="text-text-secondary">{groupCount}</span>
               </span>
             )}

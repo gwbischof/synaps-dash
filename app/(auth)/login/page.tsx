@@ -46,21 +46,24 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="flex items-center justify-center gap-3 mb-10">
-          <div className="relative w-10 h-10 flex items-center justify-center">
-            <div className="absolute inset-0 rounded-xl bg-gradient-to-br from-beam/20 to-cell/10 animate-breathe" />
+          <div className="relative w-12 h-12 flex items-center justify-center">
+            <div className="absolute inset-0 rounded-xl bg-gradient-to-br from-beam/20 via-nebula/15 to-cell/10 animate-breathe" />
             <svg
               viewBox="0 0 24 24"
-              className="w-6 h-6 text-beam relative"
+              className="w-7 h-7 text-beam relative"
               fill="none"
               stroke="currentColor"
               strokeWidth="1.5"
             >
-              <circle cx="12" cy="12" r="3" />
-              <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
-              <path d="M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" opacity="0.5" />
+              {/* Orbital rings */}
+              <ellipse cx="12" cy="12" rx="10" ry="4" opacity="0.4" />
+              <ellipse cx="12" cy="12" rx="4" ry="10" opacity="0.4" />
+              {/* Core */}
+              <circle cx="12" cy="12" r="3" fill="currentColor" opacity="0.8" />
+              <circle cx="12" cy="12" r="1.5" fill="currentColor" />
             </svg>
           </div>
-          <span className="text-xl font-semibold text-text-primary tracking-tight">
+          <span className="text-2xl font-semibold text-text-primary tracking-tight">
             SYNAPS Demo
           </span>
         </div>
@@ -195,6 +198,11 @@ export default function LoginPage() {
             </form>
           )}
         </div>
+
+        {/* Footer hint */}
+        <p className="text-center text-[11px] text-text-tertiary mt-6">
+          Cosmic Observatory • NSLS-II Beamline Monitoring
+        </p>
       </div>
     </div>
   );

@@ -13,9 +13,10 @@ interface Cell {
   y: number;
   vx: number;
   vy: number;
-  basePoints: CellPoint[]; // Points relative to center
+  basePoints: CellPoint[];
   opacity: number;
   hue: number;
+  saturation: number;
 }
 
 interface Beam {
@@ -23,6 +24,7 @@ interface Beam {
   angle: number;
   width: number;
   opacity: number;
+  hue: number;
 }
 
 // Generate irregular blob points relative to center (0,0)
@@ -70,6 +72,8 @@ export function CellularBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cellsRef = useRef<Cell[]>([]);
   const beamsRef = useRef<Beam[]>([]);
+  const starsRef = useRef<{ x: number; y: number; size: number; twinkleOffset: number }[]>([]);
+  const timeRef = useRef(0);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -93,27 +97,42 @@ export function CellularBackground() {
       canvas.style.height = `${h}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      // Generate cells
+      // Generate stars
+      starsRef.current = [];
+      const starCount = Math.floor((w * h) / 8000);
+      for (let i = 0; i < starCount; i++) {
+        starsRef.current.push({
+          x: Math.random() * w,
+          y: Math.random() * h,
+          size: Math.random() * 1.5 + 0.5,
+          twinkleOffset: Math.random() * Math.PI * 2,
+        });
+      }
+
+      // Generate cells - cosmic nebula clouds
       cellsRef.current = [];
-      const cellCount = Math.floor((w * h) / 40000);
+      const cellCount = Math.floor((w * h) / 45000);
 
       for (let i = 0; i < cellCount; i++) {
-        const baseRadius = 35 + Math.random() * 60;
+        const baseRadius = 40 + Math.random() * 70;
         const irregularity = 0.4 + Math.random() * 0.3;
         const basePoints = generateBlobPoints(baseRadius, irregularity);
 
-        // Warm color palette
-        const warmHues = [
-          20 + Math.random() * 15,
-          35 + Math.random() * 15,
-          5 + Math.random() * 15,
-          350 + Math.random() * 15,
-          15 + Math.random() * 10,
+        // Cosmic color palette: nebula purples, teals, blues, magentas
+        const cosmicColors = [
+          { hue: 270, saturation: 60 },  // Deep purple
+          { hue: 280, saturation: 55 },  // Violet
+          { hue: 250, saturation: 50 },  // Blue-purple
+          { hue: 320, saturation: 45 },  // Magenta
+          { hue: 175, saturation: 55 },  // Teal
+          { hue: 200, saturation: 50 },  // Cyan-blue
+          { hue: 220, saturation: 55 },  // Deep blue
+          { hue: 340, saturation: 40 },  // Pink
         ];
-        const hue = warmHues[Math.floor(Math.random() * warmHues.length)];
+        const color = cosmicColors[Math.floor(Math.random() * cosmicColors.length)];
 
-        // Random velocity - slow drift
-        const speed = 0.15 + Math.random() * 0.25;
+        // Slow drift
+        const speed = 0.12 + Math.random() * 0.2;
         const angle = Math.random() * Math.PI * 2;
 
         cellsRef.current.push({
@@ -122,21 +141,24 @@ export function CellularBackground() {
           vx: Math.cos(angle) * speed,
           vy: Math.sin(angle) * speed,
           basePoints,
-          opacity: 0.18 + Math.random() * 0.2,
-          hue,
+          opacity: 0.15 + Math.random() * 0.18,
+          hue: color.hue,
+          saturation: color.saturation,
         });
       }
 
-      // Generate beams
+      // Generate cosmic light beams
       beamsRef.current = [];
-      const beamCount = 3 + Math.floor(Math.random() * 2);
+      const beamCount = 2 + Math.floor(Math.random() * 2);
 
       for (let i = 0; i < beamCount; i++) {
+        const beamHues = [175, 250, 280, 320]; // Teal, blue, purple, pink
         beamsRef.current.push({
-          x: (w / (beamCount + 1)) * (i + 1) + (Math.random() - 0.5) * 200,
-          angle: -20 + Math.random() * 10,
-          width: 150 + Math.random() * 250,
-          opacity: 0.05 + Math.random() * 0.05,
+          x: (w / (beamCount + 1)) * (i + 1) + (Math.random() - 0.5) * 300,
+          angle: -15 + Math.random() * 10,
+          width: 200 + Math.random() * 300,
+          opacity: 0.04 + Math.random() * 0.04,
+          hue: beamHues[Math.floor(Math.random() * beamHues.length)],
         });
       }
     };
@@ -160,27 +182,38 @@ export function CellularBackground() {
     };
 
     const render = () => {
+      timeRef.current += 0.016;
+
       // Update cell positions
       cellsRef.current.forEach(cell => {
         cell.x += cell.vx;
         cell.y += cell.vy;
 
-        // Wrap around edges
-        if (cell.x < -100) cell.x = w + 100;
-        if (cell.x > w + 100) cell.x = -100;
-        if (cell.y < -100) cell.y = h + 100;
-        if (cell.y > h + 100) cell.y = -100;
+        if (cell.x < -120) cell.x = w + 120;
+        if (cell.x > w + 120) cell.x = -120;
+        if (cell.y < -120) cell.y = h + 120;
+        if (cell.y > h + 120) cell.y = -120;
       });
 
-      // Clear with background
-      const bgGradient = ctx.createRadialGradient(w * 0.5, h * 0.5, 0, w * 0.5, h * 0.5, Math.max(w, h) * 0.8);
-      bgGradient.addColorStop(0, '#0f0d0b');
-      bgGradient.addColorStop(0.5, '#0a0908');
-      bgGradient.addColorStop(1, '#070605');
+      // Deep space background gradient
+      const bgGradient = ctx.createRadialGradient(w * 0.5, h * 0.5, 0, w * 0.5, h * 0.5, Math.max(w, h) * 0.9);
+      bgGradient.addColorStop(0, '#0a0a12');
+      bgGradient.addColorStop(0.3, '#080810');
+      bgGradient.addColorStop(0.6, '#06060c');
+      bgGradient.addColorStop(1, '#040408');
       ctx.fillStyle = bgGradient;
       ctx.fillRect(0, 0, w, h);
 
-      // Draw light beams
+      // Draw distant stars
+      starsRef.current.forEach(star => {
+        const twinkle = Math.sin(timeRef.current * 2 + star.twinkleOffset) * 0.3 + 0.7;
+        ctx.beginPath();
+        ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(200, 210, 255, ${0.3 * twinkle})`;
+        ctx.fill();
+      });
+
+      // Draw cosmic light beams
       beamsRef.current.forEach(beam => {
         ctx.save();
         ctx.translate(beam.x, 0);
@@ -188,11 +221,11 @@ export function CellularBackground() {
 
         const gradient = ctx.createLinearGradient(-beam.width, 0, beam.width, 0);
         gradient.addColorStop(0, 'transparent');
-        gradient.addColorStop(0.2, `rgba(255, 200, 120, ${beam.opacity * 0.3})`);
-        gradient.addColorStop(0.4, `rgba(255, 240, 200, ${beam.opacity * 0.8})`);
-        gradient.addColorStop(0.5, `rgba(255, 255, 245, ${beam.opacity})`);
-        gradient.addColorStop(0.6, `rgba(255, 220, 180, ${beam.opacity * 0.7})`);
-        gradient.addColorStop(0.8, `rgba(220, 140, 100, ${beam.opacity * 0.3})`);
+        gradient.addColorStop(0.2, `hsla(${beam.hue}, 60%, 70%, ${beam.opacity * 0.3})`);
+        gradient.addColorStop(0.4, `hsla(${beam.hue}, 50%, 80%, ${beam.opacity * 0.7})`);
+        gradient.addColorStop(0.5, `hsla(${beam.hue}, 40%, 90%, ${beam.opacity})`);
+        gradient.addColorStop(0.6, `hsla(${beam.hue + 20}, 50%, 75%, ${beam.opacity * 0.6})`);
+        gradient.addColorStop(0.8, `hsla(${beam.hue + 40}, 45%, 65%, ${beam.opacity * 0.3})`);
         gradient.addColorStop(1, 'transparent');
 
         ctx.fillStyle = gradient;
@@ -200,15 +233,15 @@ export function CellularBackground() {
         ctx.restore();
       });
 
-      // Draw cells
+      // Draw nebula cells
       cellsRef.current.forEach((cell) => {
         const worldPoints = getWorldPoints(cell);
         const bounds = getBounds(worldPoints);
         const padding = 3;
 
-        // Bounding box
-        ctx.strokeStyle = `hsla(${cell.hue}, 30%, 50%, ${cell.opacity * 0.6})`;
-        ctx.lineWidth = 1.5;
+        // Detection bounding box
+        ctx.strokeStyle = `hsla(${cell.hue}, ${cell.saturation}%, 60%, ${cell.opacity * 0.5})`;
+        ctx.lineWidth = 1;
         ctx.strokeRect(
           bounds.minX - padding,
           bounds.minY - padding,
@@ -218,8 +251,8 @@ export function CellularBackground() {
 
         // Corner markers
         const cornerSize = 6;
-        ctx.strokeStyle = `hsla(${cell.hue}, 40%, 60%, ${cell.opacity * 0.8})`;
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = `hsla(${cell.hue}, ${cell.saturation + 10}%, 70%, ${cell.opacity * 0.7})`;
+        ctx.lineWidth = 1.5;
 
         // Top-left
         ctx.beginPath();
@@ -249,44 +282,46 @@ export function CellularBackground() {
         ctx.lineTo(bounds.maxX + padding, bounds.maxY + padding - cornerSize);
         ctx.stroke();
 
-        // Outer glow
+        // Outer nebula glow
         drawBlobShape(worldPoints);
         const outerGlow = ctx.createRadialGradient(
-          cell.x, cell.y, 20,
+          cell.x, cell.y, 10,
           cell.x, cell.y, 100
         );
-        outerGlow.addColorStop(0, `hsla(${cell.hue}, 50%, 50%, ${cell.opacity * 0.15})`);
+        outerGlow.addColorStop(0, `hsla(${cell.hue}, ${cell.saturation}%, 50%, ${cell.opacity * 0.2})`);
+        outerGlow.addColorStop(0.5, `hsla(${cell.hue + 20}, ${cell.saturation - 10}%, 40%, ${cell.opacity * 0.1})`);
         outerGlow.addColorStop(1, 'transparent');
         ctx.fillStyle = outerGlow;
         ctx.fill();
 
-        // Cell membrane
+        // Nebula cloud membrane
         drawBlobShape(worldPoints);
-        ctx.strokeStyle = `hsla(${cell.hue}, 35%, 60%, ${cell.opacity * 0.9})`;
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = `hsla(${cell.hue}, ${cell.saturation + 15}%, 65%, ${cell.opacity * 0.8})`;
+        ctx.lineWidth = 1.5;
         ctx.stroke();
 
-        // Cytoplasm fill
+        // Inner nebula fill
         drawBlobShape(worldPoints);
-        const cytoGradient = ctx.createRadialGradient(
-          cell.x - 10, cell.y - 10, 0,
-          cell.x, cell.y, 80
+        const nebulaGradient = ctx.createRadialGradient(
+          cell.x - 8, cell.y - 8, 0,
+          cell.x, cell.y, 70
         );
-        cytoGradient.addColorStop(0, `hsla(${cell.hue}, 45%, 50%, ${cell.opacity * 0.4})`);
-        cytoGradient.addColorStop(0.5, `hsla(${cell.hue}, 35%, 40%, ${cell.opacity * 0.25})`);
-        cytoGradient.addColorStop(1, `hsla(${cell.hue + 10}, 30%, 30%, ${cell.opacity * 0.1})`);
-        ctx.fillStyle = cytoGradient;
+        nebulaGradient.addColorStop(0, `hsla(${cell.hue}, ${cell.saturation + 10}%, 55%, ${cell.opacity * 0.5})`);
+        nebulaGradient.addColorStop(0.4, `hsla(${cell.hue + 15}, ${cell.saturation}%, 45%, ${cell.opacity * 0.3})`);
+        nebulaGradient.addColorStop(0.8, `hsla(${cell.hue + 30}, ${cell.saturation - 15}%, 35%, ${cell.opacity * 0.15})`);
+        nebulaGradient.addColorStop(1, 'transparent');
+        ctx.fillStyle = nebulaGradient;
         ctx.fill();
       });
 
-      // Vignette
+      // Subtle vignette
       const vignette = ctx.createRadialGradient(
-        w * 0.5, h * 0.5, h * 0.3,
-        w * 0.5, h * 0.5, Math.max(w, h) * 0.9
+        w * 0.5, h * 0.5, h * 0.25,
+        w * 0.5, h * 0.5, Math.max(w, h) * 0.85
       );
       vignette.addColorStop(0, 'transparent');
-      vignette.addColorStop(0.6, 'transparent');
-      vignette.addColorStop(1, 'rgba(5, 4, 3, 0.4)');
+      vignette.addColorStop(0.5, 'transparent');
+      vignette.addColorStop(1, 'rgba(4, 4, 8, 0.5)');
       ctx.fillStyle = vignette;
       ctx.fillRect(0, 0, w, h);
 

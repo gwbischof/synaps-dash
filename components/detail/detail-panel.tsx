@@ -167,7 +167,7 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
               <h3 className="data-label">Elements</h3>
               <div className="flex flex-wrap gap-2">
                 {metadata.element_list.map((element) => (
-                  <Badge key={element} variant="outline" className="border-beam text-beam bg-beam/10">
+                  <Badge key={element} variant="outline" className="border-cell text-cell bg-cell/10">
                     {element}
                   </Badge>
                 ))}

@@ -54,8 +54,15 @@ interface ArrayViewerProps {
   };
 }
 
-// Color palette for different groups
-const GROUP_COLORS = ['#ff4444', '#44ff44', '#4444ff', '#ffff44', '#44ffff', '#ff44ff'];
+// Color palette for different groups - cosmic theme
+const GROUP_COLORS = [
+  '#2dd4bf', // beam (teal)
+  '#a78bfa', // cell (purple)
+  '#60a5fa', // data (blue)
+  '#f472b6', // nova (pink)
+  '#4ade80', // live (green)
+  '#fbbf24', // warning (gold)
+];
 
 // Extract bounding boxes from metadata
 function extractBoundingBoxes(metadata?: ArrayViewerProps['metadata']): BoundingBox[] {

@@ -17,9 +17,9 @@ export function Header({ isConnected = false }: HeaderProps) {
         {/* Left: Logo & Status */}
         <div className="flex items-center gap-5">
           <div className="flex items-center gap-3">
-            {/* Logo mark */}
+            {/* Logo mark - cosmic theme */}
             <div className="relative w-8 h-8 flex items-center justify-center">
-              <div className="absolute inset-0 rounded-lg bg-gradient-to-br from-beam/20 to-cell/10" />
+              <div className="absolute inset-0 rounded-lg bg-gradient-to-br from-beam/25 to-nebula/15" />
               <svg
                 viewBox="0 0 24 24"
                 className="w-5 h-5 text-beam relative"
@@ -27,9 +27,12 @@ export function Header({ isConnected = false }: HeaderProps) {
                 stroke="currentColor"
                 strokeWidth="1.5"
               >
-                <circle cx="12" cy="12" r="3" />
-                <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
-                <path d="M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" opacity="0.5" />
+                {/* Orbital rings */}
+                <ellipse cx="12" cy="12" rx="10" ry="4" opacity="0.3" />
+                <ellipse cx="12" cy="12" rx="4" ry="10" opacity="0.3" />
+                {/* Core */}
+                <circle cx="12" cy="12" r="3" fill="currentColor" opacity="0.8" />
+                <circle cx="12" cy="12" r="1.5" fill="currentColor" />
               </svg>
             </div>
             <span className="text-[15px] font-semibold text-text-primary tracking-tight">
@@ -59,7 +62,7 @@ export function Header({ isConnected = false }: HeaderProps) {
         {isAuthenticated && (
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-raised/50 border border-border-subtle">
-              <User className="w-3.5 h-3.5 text-text-tertiary" />
+              <User className="w-3.5 h-3.5 text-cell" />
               <span className="text-[12px] font-mono text-text-secondary">
                 {user?.identities?.[0]?.id || 'User'}
               </span>
