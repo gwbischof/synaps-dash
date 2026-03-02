@@ -18,6 +18,7 @@ export async function POST(request: NextRequest) {
 
     if (!response.ok) {
       const error = await response.text();
+      console.log('[Auth Refresh] Failed:', response.status, error);
       return NextResponse.json(
         { error: error || 'Token refresh failed' },
         { status: response.status }

@@ -45,7 +45,7 @@ export function useTiledSubscription(
     const poll = async () => {
       try {
         const { listChildren } = await import('@/lib/tiled/client');
-        const result = await listChildren(path, { limit: 10, sort: '-id' });
+        const result = await listChildren(path, { limit: 10 });
 
         // On first poll, just record known IDs
         if (isFirstPollRef.current) {
@@ -153,8 +153,8 @@ export function useInfiniteScrollWithWebSocket(
     fullText?: string;
   } = {}
 ) {
-  // Note: 'id' is the only universal sort field guaranteed to work across all tiled catalogs
-  const { pageSize = 20, sort = '-id', enabled = true, fullText } = options;
+  // Sort is determined by listChildren based on path (raw vs tiled-native)
+  const { pageSize = 20, sort, enabled = true, fullText } = options;
 
   const [items, setItems] = useState<DatasetItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);

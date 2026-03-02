@@ -58,8 +58,12 @@ export async function listChildren(
   path: string,
   options: ListChildrenOptions = {}
 ): Promise<{ items: DatasetItem[]; hasMore: boolean; totalCount: number }> {
-  // Note: 'id' is the only universal sort field guaranteed to work across all tiled catalogs
-  const { offset = 0, limit = 20, sort = '-id', fullText, filters } = options;
+  // Determine appropriate sort based on path
+  // - "raw" collections (databroker) use scan_id
+  // - Other collections (tiled-native) use "_" for default ordering
+  const isRawCollection = path.includes('/raw');
+  const defaultSort = isRawCollection ? '-scan_id' : '-_';
+  const { offset = 0, limit = 20, sort = defaultSort, fullText, filters } = options;
 
   const url = new URL(`${API_BASE}/search/${path}`, window.location.origin);
   url.searchParams.set('page[offset]', offset.toString());

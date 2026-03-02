@@ -10,18 +10,9 @@ export async function GET() {
   return new Response('WebSocket endpoint - upgrade connection to use', { status: 426 });
 }
 
-// Cache API keys by access token to avoid hitting the 100 key limit
-const apiKeyCache = new Map<string, { key: string; expiresAt: number }>();
-
-// Create or get cached API key for WebSocket authentication
-async function getOrCreateApiKey(accessToken: string): Promise<string | null> {
-  // Check cache first
-  const cached = apiKeyCache.get(accessToken);
-  if (cached && cached.expiresAt > Date.now() + 10000) { // 10s buffer before expiry
-    console.log('[WS Proxy] Using cached API key');
-    return cached.key;
-  }
-
+// Create a short-lived API key for WebSocket authentication
+// Following tiled's pattern: create key, connect, then revoke immediately
+async function createApiKey(accessToken: string): Promise<{ secret: string; firstEight: string } | null> {
   try {
     const response = await fetch(`${TILED_URL}/api/v1/auth/apikey`, {
       method: 'POST',
@@ -30,9 +21,9 @@ async function getOrCreateApiKey(accessToken: string): Promise<string | null> {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        expires_in: 1800, // 30 minutes
+        expires_in: 60, // 1 minute - only needs to last for handshake
         scopes: ['read:data', 'read:metadata'],
-        note: 'synaps-websocket-proxy',
+        note: 'websocket-proxy',
       }),
     });
 
@@ -42,18 +33,30 @@ async function getOrCreateApiKey(accessToken: string): Promise<string | null> {
     }
 
     const data = await response.json();
-    console.log('[WS Proxy] Created new API key');
-
-    // Cache it
-    apiKeyCache.set(accessToken, {
-      key: data.secret,
-      expiresAt: Date.now() + 1800 * 1000, // 30 minutes
-    });
-
-    return data.secret;
+    console.log('[WS Proxy] Created API key:', data.first_eight);
+    return { secret: data.secret, firstEight: data.first_eight };
   } catch (error) {
     console.error('[WS Proxy] Error creating API key:', error);
     return null;
+  }
+}
+
+// Revoke an API key after websocket connection is established
+async function revokeApiKey(accessToken: string, firstEight: string): Promise<void> {
+  try {
+    const response = await fetch(`${TILED_URL}/api/v1/auth/apikey?first_eight=${firstEight}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+      },
+    });
+    if (response.ok) {
+      console.log('[WS Proxy] Revoked API key:', firstEight);
+    } else {
+      console.warn('[WS Proxy] Failed to revoke API key:', response.status);
+    }
+  } catch (error) {
+    console.warn('[WS Proxy] Error revoking API key:', error);
   }
 }
 
@@ -90,6 +93,7 @@ export function SOCKET(
   // Connect to Tiled - need to handle async API key creation
   const connectToTiled = async () => {
     let apiKey: string | null = null;
+    let keyInfo: { secret: string; firstEight: string } | null = null;
 
     if (token) {
       if (authType === 'apikey') {
@@ -97,14 +101,15 @@ export function SOCKET(
         apiKey = token;
         console.log('[WS Proxy] Using provided API key');
       } else {
-        // Have a Bearer token, need to get/create API key
-        console.log('[WS Proxy] Getting API key from access token...');
-        apiKey = await getOrCreateApiKey(token);
-        if (!apiKey) {
+        // Have a Bearer token, create a short-lived API key
+        console.log('[WS Proxy] Creating API key from access token...');
+        keyInfo = await createApiKey(token);
+        if (!keyInfo) {
           client.send(JSON.stringify({ type: 'proxy-error', error: 'Failed to create API key' }));
           client.close(1011, 'Auth error');
           return;
         }
+        apiKey = keyInfo.secret;
       }
     }
 
@@ -118,6 +123,12 @@ export function SOCKET(
     tiledWs.on('open', () => {
       console.log('[WS Proxy] Connected to Tiled');
       client.send(JSON.stringify({ type: 'proxy-connected' }));
+
+      // Revoke the API key now that connection is established
+      // The websocket stays authenticated; key is only needed for handshake
+      if (keyInfo && token) {
+        revokeApiKey(token, keyInfo.firstEight);
+      }
     });
 
     tiledWs.on('message', (data) => {

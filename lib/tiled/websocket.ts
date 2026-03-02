@@ -2,7 +2,7 @@ import { WebSocketMessage, DatasetItem } from './types';
 import { getValidAccessToken, getAuthType } from './auth';
 
 // Set to false to disable WebSockets entirely and use polling instead
-export const WEBSOCKETS_ENABLED = false;
+export const WEBSOCKETS_ENABLED = true;
 
 // Use our local WebSocket proxy to avoid browser header limitations
 const USE_PROXY = true;

@@ -107,13 +107,20 @@ export async function validateApiKey(apiKey: string): Promise<TiledUser> {
   return user;
 }
 
-export async function refreshAccessToken(retries = 2): Promise<TokenResponse | null> {
+// Prevent concurrent refresh attempts
+let refreshPromise: Promise<TokenResponse | null> | null = null;
+
+export async function refreshAccessToken(): Promise<TokenResponse | null> {
+  // If a refresh is already in progress, wait for it
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
   const { refreshToken } = getStoredTokens();
   if (!refreshToken) return null;
 
-  for (let attempt = 0; attempt <= retries; attempt++) {
+  refreshPromise = (async () => {
     try {
-      // Use local API route to avoid CORS issues
       const response = await fetch('/api/auth/refresh', {
         method: 'POST',
         headers: {
@@ -128,28 +135,23 @@ export async function refreshAccessToken(retries = 2): Promise<TokenResponse | n
         return data;
       }
 
-      // Only clear tokens on auth errors (401/403), not network issues
-      if (response.status === 401 || response.status === 403) {
+      // Clear tokens on auth errors (401/403/422 = invalid/expired refresh token)
+      if (response.status === 401 || response.status === 403 || response.status === 422) {
         clearTokens();
         return null;
       }
 
-      // For other errors, retry
-      if (attempt < retries) {
-        await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
-        continue;
-      }
+      // Other errors - don't clear tokens, might be temporary
+      return null;
     } catch {
-      // Network error - retry if attempts remaining
-      if (attempt < retries) {
-        await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
-        continue;
-      }
+      // Network error - don't clear tokens
+      return null;
+    } finally {
+      refreshPromise = null;
     }
-  }
+  })();
 
-  // All retries exhausted but don't clear tokens - might be temporary network issue
-  return null;
+  return refreshPromise;
 }
 
 export async function getCurrentUser(accessTokenOrApiKey: string): Promise<TiledUser | null> {
