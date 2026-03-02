@@ -107,22 +107,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     checkAuth();
   }, [checkAuth]);
 
-  // Refresh token every 5 minutes (only for token auth, not API keys)
+  // Refresh token proactively and when tab becomes visible
   useEffect(() => {
     if (!state.isAuthenticated) return;
     if (getAuthType() === 'apikey') return; // API keys don't expire
 
     const refresh = async () => {
-      const refreshed = await refreshAccessToken();
-      if (refreshed) {
-        checkAuth();
+      if (isTokenExpired()) {
+        const refreshed = await refreshAccessToken();
+        if (refreshed) {
+          checkAuth();
+        }
       }
     };
 
-    // Refresh every 5 minutes (tokens expire in 15 min)
-    const interval = setInterval(refresh, 5 * 60 * 1000);
+    // Handle visibility change - refresh when tab becomes visible
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refresh();
+      }
+    };
+
+    // Handle window focus - also catches alt-tab back to browser
+    const handleFocus = () => {
+      refresh();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+
+    // Also keep interval as backup (browsers may throttle but it still helps)
+    // Refresh every 4 minutes (tokens expire in 15 min, we mark expired at 13 min)
+    const interval = setInterval(refresh, 4 * 60 * 1000);
 
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
       clearInterval(interval);
     };
   }, [state.isAuthenticated, checkAuth]);
