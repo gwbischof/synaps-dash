@@ -120,15 +120,20 @@ export function SOCKET(
 
     const tiledWs = new NodeWebSocket(tiledWsUrl, { headers });
 
+    // Track if we've revoked the key to avoid double-revoke
+    let keyRevoked = false;
+    const revokeKeyOnce = () => {
+      if (!keyRevoked && keyInfo && token) {
+        keyRevoked = true;
+        revokeApiKey(token, keyInfo.firstEight);
+      }
+    };
+
     tiledWs.on('open', () => {
       console.log('[WS Proxy] Connected to Tiled');
       client.send(JSON.stringify({ type: 'proxy-connected' }));
-
-      // Revoke the API key now that connection is established
-      // The websocket stays authenticated; key is only needed for handshake
-      if (keyInfo && token) {
-        revokeApiKey(token, keyInfo.firstEight);
-      }
+      // Revoke key after successful handshake
+      revokeKeyOnce();
     });
 
     tiledWs.on('message', (data) => {
@@ -146,6 +151,8 @@ export function SOCKET(
 
     tiledWs.on('error', (error: Error & { code?: string }) => {
       console.error('[WS Proxy] Tiled connection error:', error.message);
+      // Revoke key on error to prevent leaks
+      revokeKeyOnce();
       // Log additional details for debugging
       if (error.message.includes('500')) {
         console.error('[WS Proxy] Server returned 500 - WebSocket streaming may not be enabled for this catalog');

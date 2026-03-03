@@ -8,7 +8,7 @@ import { ArrayViewer } from './array-viewer';
 import { SvgExportButton } from './svg-export-button';
 import { SegmentationPlotButton } from './segmentation-plot';
 import { DatasetItem } from '@/lib/tiled/types';
-import { listChildren, fetchTableData, findReconstructionByScanId } from '@/lib/tiled/client';
+import { listChildren, fetchTableData, findReconstructionByScanId, getMetadata } from '@/lib/tiled/client';
 
 interface DetailPanelProps {
   item: DatasetItem | null;
@@ -137,6 +137,7 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
   const [arrayShape, setArrayShape] = useState<number[] | null>(null);
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [segmentationTableData, setSegmentationTableData] = useState<Record<string, unknown>[] | null>(null);
+  const [reconstructionMetadata, setReconstructionMetadata] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     if (!item) return;
@@ -155,6 +156,7 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
       setIsDiscovering(true);
       setArrayPath(null);
       setArrayShape(null);
+      setReconstructionMetadata(null);
 
       const scanIdMatch = item.id.match(/automap_(\d+)_/);
 
@@ -169,9 +171,21 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
             }
             return null;
           })
-        ]).then(([reconstructionPath, tableData]) => {
-          if (reconstructionPath) {
-            setArrayPath(reconstructionPath);
+        ]).then(async ([reconstructionArrayPath, tableData]) => {
+          console.log('[DetailPanel] reconstructionArrayPath:', reconstructionArrayPath);
+          console.log('[DetailPanel] tableData:', tableData);
+          if (reconstructionArrayPath) {
+            setArrayPath(reconstructionArrayPath);
+            // Fetch metadata from the reconstruction container (parent of the array)
+            const containerPath = reconstructionArrayPath.split('/').slice(0, -1).join('/');
+            console.log('[DetailPanel] Fetching metadata from:', containerPath);
+            try {
+              const reconMeta = await getMetadata(containerPath);
+              console.log('[DetailPanel] Got reconstruction metadata:', reconMeta);
+              setReconstructionMetadata(reconMeta);
+            } catch (e) {
+              console.warn('Failed to fetch reconstruction metadata:', e);
+            }
           }
           if (tableData) {
             setSegmentationTableData(tableData);
@@ -291,7 +305,7 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
                     <div className="space-y-3">
                       <ArrayViewer
                         path={arrayPath}
-                        metadata={metadata}
+                        metadata={reconstructionMetadata || metadata}
                         showScalebar={false}
                         showColorbar={false}
                         numSlices={numSlices}

@@ -222,7 +222,18 @@ export async function getMetadata(path: string): Promise<Record<string, unknown>
   }
 
   const data = await response.json();
-  return data.attributes.metadata;
+  // Handle different response structures
+  if (data?.attributes?.metadata) {
+    return data.attributes.metadata;
+  }
+  if (data?.data?.attributes?.metadata) {
+    return data.data.attributes.metadata;
+  }
+  // Return the data itself if it looks like metadata
+  if (data && typeof data === 'object') {
+    return data;
+  }
+  throw new Error('Unexpected metadata response structure');
 }
 
 export function getThumbnailUrl(path: string, cmap: string = 'viridis', slice: number = 0): string {

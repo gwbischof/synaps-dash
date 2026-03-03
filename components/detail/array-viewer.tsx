@@ -173,8 +173,27 @@ function extractBoundingBoxes(
   if (!metadata && !segmentationRows) return boxes;
 
   const stepSize = metadata?.step_size || 1;
-  const xStart = metadata?.roi_positions?.x_start || 0;
-  const yStart = metadata?.roi_positions?.y_start || 0;
+
+  // Try multiple sources for origin coordinates
+  // 1. roi_positions.x_start/y_start (legacy format)
+  // 2. start_doc.scan.scan_input [x_start, x_end, x_points, y_start, y_end, y_points]
+  // 3. scan_params.mot1_s/mot2_s
+  let xStart = metadata?.roi_positions?.x_start;
+  let yStart = metadata?.roi_positions?.y_start;
+
+  if (xStart === undefined && metadata?.start_doc?.scan?.scan_input) {
+    const scanInput = metadata.start_doc.scan.scan_input as number[];
+    xStart = scanInput[0]; // x_start
+    yStart = scanInput[3]; // y_start
+  }
+
+  if (xStart === undefined && metadata?.scan_params) {
+    xStart = metadata.scan_params.mot1_s as number;
+    yStart = metadata.scan_params.mot2_s as number;
+  }
+
+  xStart = xStart ?? 0;
+  yStart = yStart ?? 0;
 
   let colorIndex = 0;
 
@@ -283,9 +302,10 @@ function extractBoundingBoxes(
   }
 
   // Method 3: Add boxes from external segmentation table data
+  // cx, cy are in microns (real-world coordinates), need conversion to pixels
   if (segmentationRows && segmentationRows.length > 0) {
-    console.log('[extractBoundingBoxes] segmentationRows:', segmentationRows);
-    console.log('[extractBoundingBoxes] metadata:', { stepSize, xStart, yStart });
+    console.log('[extractBoundingBoxes] Full metadata:', JSON.stringify(metadata, null, 2));
+    console.log('[extractBoundingBoxes] Using metadata: stepSize=' + stepSize + ' xStart=' + xStart + ' yStart=' + yStart);
     const color = GROUP_COLORS[colorIndex % GROUP_COLORS.length];
     for (const row of segmentationRows) {
       const cx = row.cx as number;
@@ -293,16 +313,23 @@ function extractBoundingBoxes(
       const numX = (row.num_x as number) || 10;
       const numY = (row.num_y as number) || 10;
       if (cx !== undefined && cy !== undefined) {
-        const size = ((numX + numY) / 2) / stepSize;
-        const x = (cx - xStart) / stepSize - size / 2;
-        const y = (cy - yStart) / stepSize - size / 2;
-        console.log('[extractBoundingBoxes] box:', { cx, cy, numX, numY, x, y, size });
+        // Convert micron coordinates to pixel coordinates
+        // Size in pixels = size in microns / step_size
+        const widthPx = numX / stepSize;
+        const heightPx = numY / stepSize;
+        // Center position in pixels = (position - start) / step_size
+        const centerXPx = (cx - xStart) / stepSize;
+        const centerYPx = (cy - yStart) / stepSize;
+        // Box top-left corner
+        const x = centerXPx - widthPx / 2;
+        const y = centerYPx - heightPx / 2;
+        console.log('[extractBoundingBoxes] box: cx=' + cx + ' cy=' + cy + ' -> x=' + x.toFixed(1) + ' y=' + y.toFixed(1) + ' w=' + widthPx.toFixed(1) + ' h=' + heightPx.toFixed(1));
         boxes.push({
           name: (row.label as string) || `Cell ${boxes.length + 1}`,
           x,
           y,
-          width: size,
-          height: size,
+          width: widthPx,
+          height: heightPx,
           color,
           groupName: 'Segmentation',
         });
