@@ -172,16 +172,12 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
             return null;
           })
         ]).then(async ([reconstructionArrayPath, tableData]) => {
-          console.log('[DetailPanel] reconstructionArrayPath:', reconstructionArrayPath);
-          console.log('[DetailPanel] tableData:', tableData);
           if (reconstructionArrayPath) {
             setArrayPath(reconstructionArrayPath);
             // Fetch metadata from the reconstruction container (parent of the array)
             const containerPath = reconstructionArrayPath.split('/').slice(0, -1).join('/');
-            console.log('[DetailPanel] Fetching metadata from:', containerPath);
             try {
               const reconMeta = await getMetadata(containerPath);
-              console.log('[DetailPanel] Got reconstruction metadata:', reconMeta);
               setReconstructionMetadata(reconMeta);
             } catch (e) {
               console.warn('Failed to fetch reconstruction metadata:', e);

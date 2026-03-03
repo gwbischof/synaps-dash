@@ -304,8 +304,6 @@ function extractBoundingBoxes(
   // Method 3: Add boxes from external segmentation table data
   // cx, cy are in microns (real-world coordinates), need conversion to pixels
   if (segmentationRows && segmentationRows.length > 0) {
-    console.log('[extractBoundingBoxes] Full metadata:', JSON.stringify(metadata, null, 2));
-    console.log('[extractBoundingBoxes] Using metadata: stepSize=' + stepSize + ' xStart=' + xStart + ' yStart=' + yStart);
     const color = GROUP_COLORS[colorIndex % GROUP_COLORS.length];
     for (const row of segmentationRows) {
       const cx = row.cx as number;
@@ -323,7 +321,6 @@ function extractBoundingBoxes(
         // Box top-left corner
         const x = centerXPx - widthPx / 2;
         const y = centerYPx - heightPx / 2;
-        console.log('[extractBoundingBoxes] box: cx=' + cx + ' cy=' + cy + ' -> x=' + x.toFixed(1) + ' y=' + y.toFixed(1) + ' w=' + widthPx.toFixed(1) + ' h=' + heightPx.toFixed(1));
         boxes.push({
           name: (row.label as string) || `Cell ${boxes.length + 1}`,
           x,
