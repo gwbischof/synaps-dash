@@ -236,7 +236,7 @@ export async function getMetadata(path: string): Promise<Record<string, unknown>
   throw new Error('Unexpected metadata response structure');
 }
 
-export function getThumbnailUrl(path: string, cmap: string = 'viridis', slice: number = 0): string {
+export function getThumbnailUrl(path: string, cmap: string = 'viridis', slice: number | string = 0): string {
   return `${API_BASE}/array/full/${path}?format=image/png&cmap=${cmap}&slice=${slice}`;
 }
 
@@ -248,7 +248,7 @@ export function getArrayFullUrl(path: string, format: string = 'image/png', cmap
   return `${API_BASE}/array/full/${path}?format=${encodeURIComponent(format)}&cmap=${cmap}`;
 }
 
-export async function fetchThumbnail(path: string, cmap: string = 'viridis', slice: number = 0): Promise<string | null> {
+export async function fetchThumbnail(path: string, cmap: string = 'viridis', slice: number | string = 0): Promise<string | null> {
   try {
     const authHeader = await getValidAuthHeader();
     const url = getThumbnailUrl(path, cmap, slice);
@@ -264,6 +264,19 @@ export async function fetchThumbnail(path: string, cmap: string = 'viridis', sli
   } catch {
     return null;
   }
+}
+
+// Fetch thumbnail with downsampling for large detector images
+// Uses strided slicing (e.g., ::8,::8 takes every 8th pixel)
+export async function fetchDownsampledThumbnail(
+  path: string,
+  downsampleFactor: number = 8,
+  cmap: string = 'viridis'
+): Promise<string | null> {
+  // For 3D arrays (stack of images), take middle slice and downsample spatially
+  // Slice format: "middle_slice,::factor,::factor" for 3D or "::factor,::factor" for 2D
+  const sliceExpr = `0,::${downsampleFactor},::${downsampleFactor}`;
+  return fetchThumbnail(path, cmap, sliceExpr);
 }
 
 export async function downloadImage(path: string, filename: string): Promise<void> {

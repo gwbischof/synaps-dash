@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { fetchThumbnail, listChildren, findReconstructionByScanId } from '@/lib/tiled/client';
+import { fetchThumbnail, fetchDownsampledThumbnail, listChildren, findReconstructionByScanId } from '@/lib/tiled/client';
 
 interface UseTiledThumbnailOptions {
   // Hardcoded subpath to append for thumbnail (e.g., "Ni" for reconstructions)
@@ -86,12 +86,27 @@ export function useTiledThumbnail(path: string | null, options: UseTiledThumbnai
           try {
             // BlueskyRun structure: {run}/primary/data/{detector}
             const primaryDataPath = `${path}/primary/data`;
-            const detectors = await listChildren(primaryDataPath, { limit: 10 });
-            const firstArray = detectors.items.find(item => item.structureFamily === 'array');
-            if (firstArray) {
-              targetPath = firstArray.path;
+            // Use empty sort to skip the default sort (which would fail for this path)
+            const detectors = await listChildren(primaryDataPath, { limit: 10, sort: '' });
+            // Find an array that's actually a 2D image (not 1D data like encoder values)
+            const arrays = detectors.items.filter(item => item.structureFamily === 'array');
+            // Find arrays with true 2D shape where both dimensions > 1 (actual images)
+            const imageArray = arrays.find(a => {
+              if (!a.shape || a.shape.length < 2) return false;
+              // For 2D: both dims should be > 1
+              // For 3D (stack): last two dims should be > 1
+              const lastTwo = a.shape.slice(-2);
+              return lastTwo[0] > 1 && lastTwo[1] > 1;
+            });
+            if (imageArray) {
+              // Use downsampled fetch for large detector images
+              const url = await fetchDownsampledThumbnail(imageArray.path, 8);
+              if (!cancelled) {
+                setThumbnailUrl(url);
+              }
+              return;
             } else {
-              // No array found in primary/data
+              // No 2D image found
               if (!cancelled) {
                 setThumbnailUrl(null);
                 setIsLoading(false);

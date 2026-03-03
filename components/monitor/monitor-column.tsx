@@ -34,7 +34,7 @@ export function MonitorColumn({
   const debouncedSearch = useDebouncedValue(searchQuery, 300);
 
   const {
-    items,
+    items: rawItems,
     isLoading,
     isInitialLoad,
     hasMore,
@@ -43,6 +43,16 @@ export function MonitorColumn({
     isConnected,
     mode,
   } = useInfiniteScrollWithWebSocket(path, { fullText: debouncedSearch });
+
+  // Deduplicate items by id to prevent React key warnings
+  const items = useMemo(() => {
+    const seen = new Set<string>();
+    return rawItems.filter(item => {
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
+  }, [rawItems]);
 
   const lastItemRef = useCallback(
     (node: HTMLDivElement | null) => {

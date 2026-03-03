@@ -109,7 +109,7 @@ function getThumbnailConfig(
   discoverBlueskyRun?: boolean;
   findReconstructionByScanId?: string;
 } {
-  // BlueskyRun items: discover array in primary/data/{detector}
+  // BlueskyRun items: discover array in primary/data/{detector} with downsampling
   if (specs?.includes('BlueskyRun')) {
     return { skip: false, discoverBlueskyRun: true };
   }
