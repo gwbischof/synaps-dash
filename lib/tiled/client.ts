@@ -196,7 +196,7 @@ export async function listChildren(
 
   const data: TiledSearchResponse<TiledNode> = await response.json();
 
-  const items: DatasetItem[] = data.data.map((node) => ({
+  let items: DatasetItem[] = data.data.map((node) => ({
     id: node.id,
     path: `${path}/${node.id}`,
     metadata: node.attributes.metadata,
@@ -205,6 +205,11 @@ export async function listChildren(
     shape: node.attributes.structure?.shape,
     timeCreated: findTimestamp(node.attributes.metadata),
   }));
+
+  // Filter out non-automap items from top-level reconstructions/segmentations only
+  if (path.endsWith('/reconstructions') || path.endsWith('/segmentations')) {
+    items = items.filter(item => item.id.startsWith('automap_'));
+  }
 
   function findTimestamp(metadata: Record<string, unknown>): string | undefined {
     if (!metadata) return undefined;
