@@ -18,7 +18,7 @@ function formatId(id: string): string {
   return id;
 }
 
-function findScanId(metadata: Record<string, unknown>): number | string | undefined {
+function findScanId(metadata: Record<string, unknown>, itemId?: string): number | string | undefined {
   if (!metadata) return undefined;
   if (metadata.scan_id !== undefined) return metadata.scan_id as number | string;
 
@@ -29,6 +29,13 @@ function findScanId(metadata: Record<string, unknown>): number | string | undefi
       if (nested.scan_id !== undefined) return nested.scan_id as number | string;
     }
   }
+
+  // Try to extract scan_id from item ID (e.g., "automap_392456_xxx" -> 392456)
+  if (itemId) {
+    const match = itemId.match(/automap_(\d+)_/);
+    if (match) return match[1];
+  }
+
   return undefined;
 }
 
@@ -99,11 +106,12 @@ function getThumbnailConfig(
   skip: boolean;
   subpath?: string;
   discoverArray?: boolean;
+  discoverBlueskyRun?: boolean;
   findReconstructionByScanId?: string;
 } {
-  // Skip thumbnails for BlueskyRun items (raw data) - they're containers without viewable arrays
+  // BlueskyRun items: discover array in primary/data/{detector}
   if (specs?.includes('BlueskyRun')) {
-    return { skip: true };
+    return { skip: false, discoverBlueskyRun: true };
   }
   // Reconstructions: use first element if available, otherwise discover
   if (path.includes('synaps/reconstructions')) {
@@ -112,9 +120,13 @@ function getThumbnailConfig(
     }
     return { skip: false, discoverArray: true };
   }
-  // Segmentations: discover array child within segmentation container
+  // Segmentations: show corresponding reconstruction thumbnail
   if (path.includes('synaps/segmentations')) {
-    return { skip: false, discoverArray: true };
+    const match = item?.id.match(/automap_(\d+)_/);
+    if (match) {
+      return { skip: false, findReconstructionByScanId: match[1] };
+    }
+    return { skip: true };
   }
   // Arrays can be fetched directly
   if (structureFamily === 'array') {
@@ -133,7 +145,7 @@ export function DatasetCard({ item, onClick }: DatasetCardProps) {
     groups?: Record<string, { elements?: string[] }>;
   };
 
-  const scanId = findScanId(metadata);
+  const scanId = findScanId(metadata, item.id);
 
   // Extract elements
   let elements: string[] = metadata.element_list || [];
@@ -153,7 +165,8 @@ export function DatasetCard({ item, onClick }: DatasetCardProps) {
     {
       subpath: thumbnailConfig.subpath,
       discoverArray: thumbnailConfig.discoverArray,
-      findReconstructionByScanId: thumbnailConfig.findReconstructionByScanId
+      findReconstructionByScanId: thumbnailConfig.findReconstructionByScanId,
+      discoverBlueskyRun: thumbnailConfig.discoverBlueskyRun,
     }
   );
 

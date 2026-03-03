@@ -280,7 +280,7 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
           </div>
 
           {/* Content */}
-          <ScrollArea className="flex-1">
+          <ScrollArea className="flex-1 overflow-hidden">
             <div className="p-5 space-y-5">
 
               {/* Image Viewer */}

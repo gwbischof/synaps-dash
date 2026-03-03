@@ -10,10 +10,12 @@ interface UseTiledThumbnailOptions {
   discoverArray?: boolean;
   // If set, look up corresponding reconstruction by scan_id
   findReconstructionByScanId?: string;
+  // If true, discover array in BlueskyRun structure (primary/data/{detector})
+  discoverBlueskyRun?: boolean;
 }
 
 export function useTiledThumbnail(path: string | null, options: UseTiledThumbnailOptions = {}) {
-  const { subpath, discoverArray = false, findReconstructionByScanId: scanIdToFind } = options;
+  const { subpath, discoverArray = false, findReconstructionByScanId: scanIdToFind, discoverBlueskyRun = false } = options;
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -79,6 +81,33 @@ export function useTiledThumbnail(path: string | null, options: UseTiledThumbnai
           }
         }
 
+        // If discoverBlueskyRun is true, find array in primary/data/{detector}
+        if (discoverBlueskyRun) {
+          try {
+            // BlueskyRun structure: {run}/primary/data/{detector}
+            const primaryDataPath = `${path}/primary/data`;
+            const detectors = await listChildren(primaryDataPath, { limit: 10 });
+            const firstArray = detectors.items.find(item => item.structureFamily === 'array');
+            if (firstArray) {
+              targetPath = firstArray.path;
+            } else {
+              // No array found in primary/data
+              if (!cancelled) {
+                setThumbnailUrl(null);
+                setIsLoading(false);
+              }
+              return;
+            }
+          } catch {
+            // BlueskyRun structure not found
+            if (!cancelled) {
+              setThumbnailUrl(null);
+              setIsLoading(false);
+            }
+            return;
+          }
+        }
+
         const url = await fetchThumbnail(targetPath);
         if (!cancelled) {
           setThumbnailUrl(url);
@@ -103,7 +132,7 @@ export function useTiledThumbnail(path: string | null, options: UseTiledThumbnai
         URL.revokeObjectURL(thumbnailUrl);
       }
     };
-  }, [path, subpath, discoverArray, scanIdToFind]);
+  }, [path, subpath, discoverArray, scanIdToFind, discoverBlueskyRun]);
 
   return { thumbnailUrl, isLoading, error };
 }
