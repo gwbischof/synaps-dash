@@ -3,6 +3,11 @@
 import { useState, useEffect } from 'react';
 import { fetchThumbnail, fetchDownsampledThumbnail, listChildren, findReconstructionByScanId } from '@/lib/tiled/client';
 
+// Persistent cache for discovered array paths - survives re-renders
+const discoveredArrayPaths = new Map<string, string | null>();
+// Persistent cache for thumbnail URLs
+const thumbnailCache = new Map<string, string>();
+
 interface UseTiledThumbnailOptions {
   // Hardcoded subpath to append for thumbnail (e.g., "Ni" for reconstructions)
   subpath?: string;
@@ -26,6 +31,17 @@ export function useTiledThumbnail(path: string | null, options: UseTiledThumbnai
       return;
     }
 
+    // Create a cache key based on all options
+    const cacheKey = `${path}|${subpath || ''}|${discoverArray}|${scanIdToFind || ''}`;
+
+    // Check thumbnail cache first
+    const cachedThumbnail = thumbnailCache.get(cacheKey);
+    if (cachedThumbnail) {
+      setThumbnailUrl(cachedThumbnail);
+      setIsLoading(false);
+      return;
+    }
+
     let cancelled = false;
 
     const load = async () => {
@@ -37,46 +53,79 @@ export function useTiledThumbnail(path: string | null, options: UseTiledThumbnai
 
         // If scanIdToFind is set, look up corresponding reconstruction
         if (scanIdToFind) {
-          const reconstructionArrayPath = await findReconstructionByScanId(path, scanIdToFind);
-          if (!reconstructionArrayPath) {
-            if (!cancelled) {
-              setThumbnailUrl(null);
-              setIsLoading(false);
+          // Check discovery cache first
+          const discoverKey = `scanId:${path}:${scanIdToFind}`;
+          if (discoveredArrayPaths.has(discoverKey)) {
+            const cached = discoveredArrayPaths.get(discoverKey);
+            if (!cached) {
+              if (!cancelled) {
+                setThumbnailUrl(null);
+                setIsLoading(false);
+              }
+              return;
             }
-            return;
+            targetPath = cached;
+          } else {
+            const reconstructionArrayPath = await findReconstructionByScanId(path, scanIdToFind);
+            discoveredArrayPaths.set(discoverKey, reconstructionArrayPath);
+            if (!reconstructionArrayPath) {
+              if (!cancelled) {
+                setThumbnailUrl(null);
+                setIsLoading(false);
+              }
+              return;
+            }
+            targetPath = reconstructionArrayPath;
           }
-          targetPath = reconstructionArrayPath;
         }
 
         // If discoverArray is true, find the first array child
         if (discoverArray) {
-          const children = await listChildren(path, { limit: 10 });
-          const firstArray = children.items.find(item => item.structureFamily === 'array');
-          if (firstArray) {
-            targetPath = firstArray.path;
+          // Check discovery cache first
+          const discoverKey = `array:${path}`;
+          if (discoveredArrayPaths.has(discoverKey)) {
+            const cached = discoveredArrayPaths.get(discoverKey);
+            if (!cached) {
+              if (!cancelled) {
+                setThumbnailUrl(null);
+                setIsLoading(false);
+              }
+              return;
+            }
+            targetPath = cached;
           } else {
-            // Try one level deeper
-            const firstContainer = children.items.find(item => item.structureFamily === 'container');
-            if (firstContainer) {
-              const grandchildren = await listChildren(firstContainer.path, { limit: 10 });
-              const nestedArray = grandchildren.items.find(item => item.structureFamily === 'array');
-              if (nestedArray) {
-                targetPath = nestedArray.path;
+            const children = await listChildren(path, { limit: 10 });
+            const firstArray = children.items.find(item => item.structureFamily === 'array');
+            if (firstArray) {
+              targetPath = firstArray.path;
+              discoveredArrayPaths.set(discoverKey, targetPath);
+            } else {
+              // Try one level deeper
+              const firstContainer = children.items.find(item => item.structureFamily === 'container');
+              if (firstContainer) {
+                const grandchildren = await listChildren(firstContainer.path, { limit: 10 });
+                const nestedArray = grandchildren.items.find(item => item.structureFamily === 'array');
+                if (nestedArray) {
+                  targetPath = nestedArray.path;
+                  discoveredArrayPaths.set(discoverKey, targetPath);
+                } else {
+                  // No array found
+                  discoveredArrayPaths.set(discoverKey, null);
+                  if (!cancelled) {
+                    setThumbnailUrl(null);
+                    setIsLoading(false);
+                  }
+                  return;
+                }
               } else {
-                // No array found
+                // No array or container found
+                discoveredArrayPaths.set(discoverKey, null);
                 if (!cancelled) {
                   setThumbnailUrl(null);
                   setIsLoading(false);
                 }
                 return;
               }
-            } else {
-              // No array or container found
-              if (!cancelled) {
-                setThumbnailUrl(null);
-                setIsLoading(false);
-              }
-              return;
             }
           }
         }
@@ -127,7 +176,9 @@ export function useTiledThumbnail(path: string | null, options: UseTiledThumbnai
         }
 
         const url = await fetchThumbnail(targetPath);
-        if (!cancelled) {
+        if (!cancelled && url) {
+          // Cache the thumbnail URL
+          thumbnailCache.set(cacheKey, url);
           setThumbnailUrl(url);
         }
       } catch (err) {
@@ -146,9 +197,7 @@ export function useTiledThumbnail(path: string | null, options: UseTiledThumbnai
 
     return () => {
       cancelled = true;
-      if (thumbnailUrl) {
-        URL.revokeObjectURL(thumbnailUrl);
-      }
+      // Don't revoke blob URLs - they're cached and may be reused
     };
   }, [path, subpath, discoverArray, scanIdToFind, discoverBlueskyRun]);
 

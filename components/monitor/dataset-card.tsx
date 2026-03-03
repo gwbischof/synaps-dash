@@ -121,7 +121,7 @@ function getThumbnailConfig(
     }
     return { skip: false, discoverArray: true };
   }
-  // Segmentations: show corresponding reconstruction thumbnail
+  // Segmentations: show corresponding reconstruction thumbnail (cached after first lookup)
   if (path.includes('synaps/segmentations')) {
     const match = item?.id.match(/automap_(\d+)_/);
     if (match) {

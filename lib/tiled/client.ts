@@ -4,6 +4,32 @@ import { getAuthHeader, getValidAccessToken, getAuthType, clearTokens } from './
 // Use local API proxy to avoid CORS issues
 const API_BASE = '/api/tiled';
 
+// Request deduplication cache - prevents duplicate concurrent requests
+const pendingRequests = new Map<string, Promise<Response>>();
+const CACHE_TTL = 30000; // Cache results for 30 seconds to reduce API load
+const responseCache = new Map<string, { data: unknown; timestamp: number }>();
+
+function getCachedResponse<T>(key: string): T | null {
+  const cached = responseCache.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data as T;
+  }
+  return null;
+}
+
+function setCachedResponse(key: string, data: unknown): void {
+  responseCache.set(key, { data, timestamp: Date.now() });
+  // Clean old entries periodically
+  if (responseCache.size > 100) {
+    const now = Date.now();
+    for (const [k, v] of responseCache) {
+      if (now - v.timestamp > CACHE_TTL) {
+        responseCache.delete(k);
+      }
+    }
+  }
+}
+
 // Keep original URL for reference/WebSocket
 const TILED_URL = process.env.NEXT_PUBLIC_TILED_URL || 'https://tiled.nsls2.bnl.gov';
 
@@ -103,12 +129,14 @@ export async function listChildren(
   options: ListChildrenOptions = {}
 ): Promise<{ items: DatasetItem[]; hasMore: boolean; totalCount: number }> {
   // Determine appropriate sort based on path
-  // - "raw" collections (databroker) use scan_id
-  // - synaps reconstructions/segmentations use time_created
+  // - "raw" collections (databroker) use scan_id (top-level)
+  // - synaps reconstructions use metadata.scan_id (tiled-native)
+  // - synaps segmentations have empty metadata, sort by id (contains scan_id)
   // - Other collections use "_" for default ordering
   const getDefaultSort = (p: string): string => {
     if (p.includes('/raw')) return '-scan_id';
-    if (p.includes('synaps/reconstructions') || p.includes('synaps/segmentations')) return '-time_created';
+    if (p.includes('/reconstructions')) return '-metadata.scan_id';
+    if (p.includes('/segmentations')) return '-id';
     return '-_';
   };
   const { offset = 0, limit = 20, sort = getDefaultSort(path), fullText, filters } = options;
@@ -143,7 +171,15 @@ export async function listChildren(
     }
   }
 
-  const response = await fetchWithAuth(url.toString());
+  const cacheKey = url.toString();
+
+  // Check cache first
+  const cached = getCachedResponse<{ items: DatasetItem[]; hasMore: boolean; totalCount: number }>(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const response = await fetchWithAuth(cacheKey);
 
   if (!response.ok) {
     throw new Error(`Failed to list children: ${response.status} ${response.statusText}`);
@@ -206,11 +242,16 @@ export async function listChildren(
     return undefined;
   }
 
-  return {
+  const result = {
     items,
     hasMore: data.links.next !== null,
     totalCount: data.meta.count,
   };
+
+  // Cache the result
+  setCachedResponse(cacheKey, result);
+
+  return result;
 }
 
 export async function getMetadata(path: string): Promise<Record<string, unknown>> {
