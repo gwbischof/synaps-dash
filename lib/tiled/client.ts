@@ -9,6 +9,15 @@ const pendingRequests = new Map<string, Promise<Response>>();
 const CACHE_TTL = 30000; // Cache results for 30 seconds to reduce API load
 const responseCache = new Map<string, { data: unknown; timestamp: number }>();
 
+// Reconstruction cache: maps scan_id -> reconstruction item (persists across session)
+const reconstructionByScanId = new Map<string, DatasetItem>();
+
+// Helper to extract scan_id from item ID (e.g., "automap_394157_xxx" -> "394157")
+function extractScanIdFromId(id: string): string | null {
+  const match = id.match(/automap_(\d+)_/);
+  return match ? match[1] : null;
+}
+
 function getCachedResponse<T>(key: string): T | null {
   const cached = responseCache.get(key);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
@@ -251,6 +260,16 @@ export async function listChildren(
   // Cache the result
   setCachedResponse(cacheKey, result);
 
+  // Populate reconstruction cache when loading reconstructions
+  if (path.includes('/reconstructions') && !path.includes('/reconstructions/')) {
+    for (const item of items) {
+      const scanId = extractScanIdFromId(item.id);
+      if (scanId && !reconstructionByScanId.has(scanId)) {
+        reconstructionByScanId.set(scanId, item);
+      }
+    }
+  }
+
   return result;
 }
 
@@ -386,15 +405,33 @@ export async function findReconstructionByScanId(
   segmentationPath: string,
   scanId: string
 ): Promise<string | null> {
-  // Convert path: .../synaps/segmentations/automap_123_xxx → .../synaps/reconstructions
+  // Check cache first - populated when reconstructions column is loaded
+  const cachedReconstruction = reconstructionByScanId.get(scanId);
+  if (cachedReconstruction) {
+    // Get first array child from this reconstruction
+    const children = await listChildren(cachedReconstruction.path, { limit: 10 });
+    const firstArray = children.items.find(item => item.structureFamily === 'array');
+    return firstArray?.path || null;
+  }
+
+  // Cache miss - query tiled directly for reconstruction with this scan_id
   const pathParts = segmentationPath.split('/');
   const reconstructionsPath = pathParts.slice(0, -1).join('/').replace('segmentations', 'reconstructions');
 
   try {
-    const result = await listChildren(reconstructionsPath, { limit: 50 });
-    // Find reconstruction with matching scan_id prefix
-    const match = result.items.find(item => item.id.startsWith(`automap_${scanId}_`));
-    if (match) {
+    // Query with scan_id filter
+    const result = await listChildren(reconstructionsPath, {
+      limit: 1,
+      filters: {
+        'filter[eq][condition][key]': 'scan_id',
+        'filter[eq][condition][value]': scanId
+      }
+    });
+
+    if (result.items.length > 0) {
+      const match = result.items[0];
+      // Cache it for future lookups
+      reconstructionByScanId.set(scanId, match);
       // Get first array child from this reconstruction
       const children = await listChildren(match.path, { limit: 10 });
       const firstArray = children.items.find(item => item.structureFamily === 'array');

@@ -517,38 +517,42 @@ export function ArrayViewer({
                 preserveAspectRatio="xMidYMid meet"
               >
               {/* Bounding boxes */}
-              {boundingBoxes.map((box, idx) => (
-                <g key={idx}>
-                  <rect
-                    x={box.x}
-                    y={box.y}
-                    width={box.width}
-                    height={box.height}
-                    fill="none"
-                    stroke={box.color}
-                    strokeWidth={Math.max(0.5, 1 / scale)}
-                  />
-                  <rect
-                    x={box.x + box.width / 2 - Math.max(box.name.length * 3 / scale + 3 / scale, 15 / scale) / 2}
-                    y={box.y - 7 / scale}
-                    width={Math.max(box.name.length * 3 / scale + 3 / scale, 15 / scale)}
-                    height={6 / scale}
-                    fill="rgba(0, 0, 0, 0.75)"
-                    rx={1 / scale}
-                  />
-                  <text
-                    x={box.x + box.width / 2}
-                    y={box.y - 2 / scale}
-                    fill={box.color}
-                    fontSize={4 / scale}
-                    fontFamily="ui-monospace, monospace"
-                    fontWeight="500"
-                    textAnchor="middle"
-                  >
-                    {box.name}
-                  </text>
-                </g>
-              ))}
+              {boundingBoxes.map((box, idx) => {
+                const labelWidth = Math.max(box.name.length * 2 / scale + 2 / scale, 10 / scale);
+                const labelHeight = 4 / scale;
+                return (
+                  <g key={idx}>
+                    <rect
+                      x={box.x}
+                      y={box.y}
+                      width={box.width}
+                      height={box.height}
+                      fill="none"
+                      stroke={box.color}
+                      strokeWidth={Math.max(0.25, 0.5 / scale)}
+                    />
+                    <rect
+                      x={box.x + box.width / 2 - labelWidth / 2}
+                      y={box.y + 1 / scale}
+                      width={labelWidth}
+                      height={labelHeight}
+                      fill="rgba(0, 0, 0, 0.75)"
+                      rx={0.5 / scale}
+                    />
+                    <text
+                      x={box.x + box.width / 2}
+                      y={box.y + 1 / scale + labelHeight * 0.75}
+                      fill={box.color}
+                      fontSize={2.5 / scale}
+                      fontFamily="ui-monospace, monospace"
+                      fontWeight="500"
+                      textAnchor="middle"
+                    >
+                      {box.name}
+                    </text>
+                  </g>
+                );
+              })}
 
               {/* Scalebar - bottom right */}
               {showScalebar && scalebarPixels > 0 && (
