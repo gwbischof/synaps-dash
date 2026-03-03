@@ -20,13 +20,24 @@ function CollapsibleSection({
   children,
   defaultOpen = false,
   icon: Icon,
+  copyValue,
 }: {
   title: string;
   children: React.ReactNode;
   defaultOpen?: boolean;
   icon?: React.ElementType;
+  copyValue?: string;
 }) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!copyValue) return;
+    await navigator.clipboard.writeText(copyValue);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   return (
     <motion.div
@@ -41,12 +52,23 @@ function CollapsibleSection({
           {Icon && <Icon className="w-3.5 h-3.5 text-text-tertiary group-hover:text-beam transition-colors" />}
           <span className="font-medium text-text-secondary group-hover:text-text-primary transition-colors">{title}</span>
         </div>
-        <motion.div
-          animate={{ rotate: isOpen ? 180 : 0 }}
-          transition={{ duration: 0.2 }}
-        >
-          <ChevronDown className="h-4 w-4 text-text-tertiary" />
-        </motion.div>
+        <div className="flex items-center gap-2">
+          {copyValue && (
+            <div
+              role="button"
+              onClick={handleCopy}
+              className="p-1.5 text-text-tertiary hover:text-beam hover:bg-beam/10 rounded-md transition-all"
+            >
+              {copied ? <Check className="h-3 w-3 text-live" /> : <Copy className="h-3 w-3" />}
+            </div>
+          )}
+          <motion.div
+            animate={{ rotate: isOpen ? 180 : 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            <ChevronDown className="h-4 w-4 text-text-tertiary" />
+          </motion.div>
+        </div>
       </button>
       <AnimatePresence>
         {isOpen && (
@@ -57,7 +79,7 @@ function CollapsibleSection({
             transition={{ duration: 0.2, ease: 'easeInOut' }}
             className="overflow-hidden"
           >
-            <div className="px-4 pb-4 pt-1">{children}</div>
+            <div className="px-4 pb-4 pt-1 overflow-hidden">{children}</div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -206,10 +228,32 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
           }
         })
         .finally(() => setIsDiscovering(false));
-    } else {
+      return;
+    }
+
+    // Handle BlueskyRun items - discover array in primary/data/{detector}
+    if (item.specs?.includes('BlueskyRun')) {
+      setIsDiscovering(true);
       setArrayPath(null);
       setArrayShape(null);
+
+      const primaryDataPath = `${item.path}/primary/data`;
+      listChildren(primaryDataPath, { limit: 20, sort: '' })
+        .then((result) => {
+          // BlueskyRun detector data (like eiger2_image) is often stored externally
+          // and may not be directly accessible via tiled's array endpoint.
+          // For now, we skip showing the image to avoid 500 errors.
+          // The arrays are discovered but we don't set arrayPath.
+        })
+        .catch(err => {
+          console.warn('[DetailPanel] BlueskyRun discovery failed:', err);
+        })
+        .finally(() => setIsDiscovering(false));
+      return;
     }
+
+    setArrayPath(null);
+    setArrayShape(null);
   }, [item]);
 
   if (!item) return null;
@@ -230,7 +274,17 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
   };
 
   const hasViewableArray = arrayPath !== null;
-  const numSlices = arrayShape && arrayShape.length === 3 ? arrayShape[0] : undefined;
+  // Compute numSlices based on array dimensionality
+  // 3D [N, H, W]: numSlices = N (first dimension)
+  // 4D [1, N, H, W]: numSlices = N (second dimension, first is usually batch=1)
+  let numSlices: number | undefined;
+  if (arrayShape) {
+    if (arrayShape.length === 3) {
+      numSlices = arrayShape[0];
+    } else if (arrayShape.length === 4) {
+      numSlices = arrayShape[1]; // Second dimension for 4D arrays
+    }
+  }
 
   return (
     <motion.div
@@ -281,7 +335,7 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
 
           {/* Content */}
           <ScrollArea className="flex-1 overflow-hidden">
-            <div className="p-5 space-y-5">
+            <div className="p-5 space-y-5 min-w-0 max-w-full">
 
               {/* Image Viewer */}
               {(hasViewableArray || isDiscovering) && (
@@ -305,6 +359,7 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
                         showScalebar={false}
                         showColorbar={false}
                         numSlices={numSlices}
+                        arrayShape={arrayShape || undefined}
                         segmentationRows={segmentationTableData}
                       />
                       <div className="flex gap-2">
@@ -402,7 +457,12 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.25 }}
               >
-                <CollapsibleSection title="Metadata" defaultOpen={true} icon={Layers}>
+                <CollapsibleSection
+                  title="Metadata"
+                  defaultOpen={true}
+                  icon={Layers}
+                  copyValue={JSON.stringify({ uid: metadata.uid, sample: metadata.sample, project: metadata.project, step_size: metadata.step_size, timeCreated: item.timeCreated }, null, 2)}
+                >
                   <div className="divide-y divide-border-subtle">
                     {metadata.uid && (
                       <MetadataItem label="UID" value={`${metadata.uid.slice(0, 8)}...`} copyable />
@@ -430,7 +490,7 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.3 }}
                 >
-                  <CollapsibleSection title="ROI Positions" icon={Maximize2}>
+                  <CollapsibleSection title="ROI Positions" icon={Maximize2} copyValue={JSON.stringify(metadata.roi_positions, null, 2)}>
                     <div className="divide-y divide-border-subtle">
                       {Object.entries(metadata.roi_positions).map(([key, value]) => (
                         <MetadataItem
@@ -450,10 +510,12 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.35 }}
               >
-                <CollapsibleSection title="Raw Data">
-                  <pre className="bg-void/50 rounded-lg p-3 text-[11px] text-text-secondary overflow-x-auto font-mono border border-border-subtle max-h-64 overflow-y-auto">
-                    {JSON.stringify(item.metadata, null, 2)}
-                  </pre>
+                <CollapsibleSection title="Raw Data" copyValue={JSON.stringify(item.metadata, null, 2)}>
+                  <div className="w-0 min-w-full">
+                    <pre className="bg-void/50 rounded-lg p-3 text-[11px] text-text-secondary overflow-auto font-mono border border-border-subtle max-h-64">
+                      {JSON.stringify(item.metadata, null, 2)}
+                    </pre>
+                  </div>
                 </CollapsibleSection>
               </motion.div>
 

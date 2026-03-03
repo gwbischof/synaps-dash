@@ -19,6 +19,7 @@ export async function GET(
       headers['Authorization'] = authHeader;
     }
 
+    console.log('[Tiled Proxy] Fetching:', url);
     const response = await fetch(url, { headers });
 
     // Get the content type to handle different response types
@@ -26,6 +27,7 @@ export async function GET(
 
     if (!response.ok) {
       const error = await response.text();
+      console.error('[Tiled Proxy] Error from tiled:', response.status, url, error.slice(0, 500));
       return NextResponse.json(
         { error: error || `Request failed: ${response.status}` },
         { status: response.status }

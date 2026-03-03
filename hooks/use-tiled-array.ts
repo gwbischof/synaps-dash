@@ -100,9 +100,12 @@ export function useTiledThumbnail(path: string | null, options: UseTiledThumbnai
             });
             if (imageArray) {
               // Use downsampled fetch for large detector images
-              const url = await fetchDownsampledThumbnail(imageArray.path, 8);
+              // Pass array dimensions so proper slice syntax is used
+              const arrayDims = imageArray.shape?.length || 3;
+              const url = await fetchDownsampledThumbnail(imageArray.path, 8, 'viridis', arrayDims);
               if (!cancelled) {
                 setThumbnailUrl(url);
+                setIsLoading(false);
               }
               return;
             } else {

@@ -109,9 +109,10 @@ function getThumbnailConfig(
   discoverBlueskyRun?: boolean;
   findReconstructionByScanId?: string;
 } {
-  // BlueskyRun items: discover array in primary/data/{detector} with downsampling
+  // BlueskyRun items: skip thumbnails (tiled server can't render eiger2_image data)
+  // The discovery works but tiled returns 500 errors accessing detector data
   if (specs?.includes('BlueskyRun')) {
-    return { skip: false, discoverBlueskyRun: true };
+    return { skip: true };
   }
   // Reconstructions: use first element if available, otherwise discover
   if (path.includes('synaps/reconstructions')) {

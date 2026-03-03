@@ -149,6 +149,8 @@ interface ArrayViewerProps {
   colormap?: 'viridis' | 'grayscale';
   // For 3D arrays: total number of slices
   numSlices?: number;
+  // Full array shape for computing proper slice indices
+  arrayShape?: number[];
   // External segmentation table data for overlay
   segmentationRows?: Record<string, unknown>[] | null;
 }
@@ -360,6 +362,7 @@ export function ArrayViewer({
   scalebarUnit = 'µm',
   colormap = 'viridis',
   numSlices,
+  arrayShape,
   segmentationRows,
 }: ArrayViewerProps) {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -386,8 +389,19 @@ export function ArrayViewer({
       setError(null);
 
       try {
+        // Compute slice expression based on array dimensionality
+        // For 3D [N, H, W]: slice=currentSlice
+        // For 4D [1, N, H, W]: slice=0,currentSlice (let tiled infer remaining dims)
+        // For 4D [N, M, H, W]: slice=0,currentSlice
+        let sliceExpr: number | string = currentSlice;
+        if (arrayShape && arrayShape.length === 4) {
+          // 4D array: just provide indices for first two dimensions
+          // Tiled should return the remaining 2D slice
+          sliceExpr = `0,${currentSlice}`;
+        }
+
         // Fetch grayscale image from Tiled with current slice
-        const grayscaleUrl = await fetchThumbnail(path, 'viridis', currentSlice);
+        const grayscaleUrl = await fetchThumbnail(path, 'viridis', sliceExpr);
         if (cancelled || !grayscaleUrl) return;
 
         // Apply colormap if requested
@@ -414,7 +428,7 @@ export function ArrayViewer({
       cancelled = true;
       if (currentUrl) URL.revokeObjectURL(currentUrl);
     };
-  }, [path, colormap, currentSlice]);
+  }, [path, colormap, currentSlice, arrayShape]);
 
   // Track container width for scaling
   useEffect(() => {
@@ -437,7 +451,7 @@ export function ArrayViewer({
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-64 rounded-xl bg-surface-raised border border-border-subtle">
+      <div className="flex items-center justify-center aspect-square rounded-xl bg-surface-raised border border-border-subtle">
         <div className="text-center">
           <Loader2 className="h-6 w-6 text-beam animate-spin mx-auto mb-2" />
           <p className="text-xs text-text-tertiary">Loading image...</p>
@@ -448,7 +462,7 @@ export function ArrayViewer({
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-64 rounded-xl bg-surface-raised border border-border-subtle">
+      <div className="flex items-center justify-center aspect-square rounded-xl bg-surface-raised border border-border-subtle">
         <div className="text-center p-6">
           <p className="text-error text-sm font-medium mb-1">Failed to load image</p>
           <p className="text-text-tertiary text-xs">{error}</p>
@@ -459,7 +473,7 @@ export function ArrayViewer({
 
   if (!imageUrl) {
     return (
-      <div className="flex items-center justify-center h-64 rounded-xl bg-surface-raised border border-border-subtle">
+      <div className="flex items-center justify-center aspect-square rounded-xl bg-surface-raised border border-border-subtle">
         <p className="text-text-tertiary text-sm">No image available</p>
       </div>
     );
@@ -483,27 +497,25 @@ export function ArrayViewer({
     : 0;
 
   return (
-    <div
-      ref={containerRef}
-      className="relative rounded-xl overflow-hidden border border-border-subtle bg-surface-ground"
-    >
+    <div className="relative rounded-xl overflow-hidden border border-border-subtle bg-surface-ground">
       <div className="flex">
-        {/* Main image container */}
-        <div className="relative flex-1">
-          <img
-            src={imageUrl}
-            alt="Array visualization"
-            className="w-full h-auto max-h-96 object-contain"
-            onLoad={handleImageLoad}
-          />
+        {/* Main image container with padding wrapper */}
+        <div className="flex-1 aspect-square bg-void/30 p-3">
+          <div ref={containerRef} className="relative w-full h-full">
+            <img
+              src={imageUrl}
+              alt="Array visualization"
+              className="w-full h-full object-contain"
+              onLoad={handleImageLoad}
+            />
 
-          {/* SVG overlay for bounding boxes, scalebar, and title */}
-          {imageDimensions && (
-            <svg
-              className="absolute top-0 left-0 w-full h-full pointer-events-none"
-              viewBox={`0 0 ${imageDimensions.width} ${imageDimensions.height}`}
-              preserveAspectRatio="xMidYMid meet"
-            >
+            {/* SVG overlay for bounding boxes, scalebar, and title */}
+            {imageDimensions && (
+              <svg
+                className="absolute top-0 left-0 w-full h-full pointer-events-none"
+                viewBox={`0 0 ${imageDimensions.width} ${imageDimensions.height}`}
+                preserveAspectRatio="xMidYMid meet"
+              >
               {/* Bounding boxes */}
               {boundingBoxes.map((box, idx) => (
                 <g key={idx}>
@@ -514,23 +526,24 @@ export function ArrayViewer({
                     height={box.height}
                     fill="none"
                     stroke={box.color}
-                    strokeWidth={Math.max(1, 2 / scale)}
+                    strokeWidth={Math.max(0.5, 1 / scale)}
                   />
                   <rect
-                    x={box.x}
-                    y={box.y - 14 / scale}
-                    width={Math.max(box.name.length * 5.5 / scale + 6 / scale, 30 / scale)}
-                    height={12 / scale}
+                    x={box.x + box.width / 2 - Math.max(box.name.length * 3 / scale + 3 / scale, 15 / scale) / 2}
+                    y={box.y - 7 / scale}
+                    width={Math.max(box.name.length * 3 / scale + 3 / scale, 15 / scale)}
+                    height={6 / scale}
                     fill="rgba(0, 0, 0, 0.75)"
-                    rx={2 / scale}
+                    rx={1 / scale}
                   />
                   <text
-                    x={box.x + 3 / scale}
-                    y={box.y - 4 / scale}
+                    x={box.x + box.width / 2}
+                    y={box.y - 2 / scale}
                     fill={box.color}
-                    fontSize={9 / scale}
+                    fontSize={4 / scale}
                     fontFamily="ui-monospace, monospace"
-                    fontWeight="600"
+                    fontWeight="500"
+                    textAnchor="middle"
                   >
                     {box.name}
                   </text>
@@ -632,6 +645,7 @@ export function ArrayViewer({
               )}
             </div>
           )}
+          </div>
         </div>
 
         {/* Colorbar - right side */}

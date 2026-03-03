@@ -237,6 +237,8 @@ export async function getMetadata(path: string): Promise<Record<string, unknown>
 }
 
 export function getThumbnailUrl(path: string, cmap: string = 'viridis', slice: number | string = 0): string {
+  // Build URL with slice parameter
+  // Note: slice can contain commas and colons which are valid in query params without encoding
   return `${API_BASE}/array/full/${path}?format=image/png&cmap=${cmap}&slice=${slice}`;
 }
 
@@ -271,11 +273,13 @@ export async function fetchThumbnail(path: string, cmap: string = 'viridis', sli
 export async function fetchDownsampledThumbnail(
   path: string,
   downsampleFactor: number = 8,
-  cmap: string = 'viridis'
+  cmap: string = 'viridis',
+  arrayDims: number = 3
 ): Promise<string | null> {
-  // For 3D arrays (stack of images), take middle slice and downsample spatially
-  // Slice format: "middle_slice,::factor,::factor" for 3D or "::factor,::factor" for 2D
-  const sliceExpr = `0,::${downsampleFactor},::${downsampleFactor}`;
+  // For 3D arrays: "0,::factor,::factor"
+  // For 4D arrays: "0,0,::factor,::factor"
+  const prefix = arrayDims === 4 ? '0,0' : '0';
+  const sliceExpr = `${prefix},::${downsampleFactor},::${downsampleFactor}`;
   return fetchThumbnail(path, cmap, sliceExpr);
 }
 
