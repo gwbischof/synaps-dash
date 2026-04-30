@@ -5,10 +5,19 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, ChevronDown, Copy, Check, Layers, Grid3X3, Clock, Hash, Maximize2, Activity } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ArrayViewer } from './array-viewer';
+import { HoloptychoViewer } from './holoptycho-viewer';
 import { SvgExportButton } from './svg-export-button';
 import { SegmentationPlotButton } from './segmentation-plot';
 import { DatasetItem } from '@/lib/tiled/types';
 import { listChildren, fetchTableData, findReconstructionByScanId, getMetadata } from '@/lib/tiled/client';
+
+function isHoloptychoRun(path: string, structureFamily: string): boolean {
+  if (structureFamily !== 'container') return false;
+  const idx = path.indexOf('hxn/processed/holoptycho/');
+  if (idx === -1) return false;
+  const tail = path.slice(idx + 'hxn/processed/holoptycho/'.length);
+  return tail.length > 0 && !tail.includes('/');
+}
 
 interface DetailPanelProps {
   item: DatasetItem | null;
@@ -161,11 +170,22 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
   const [segmentationTableData, setSegmentationTableData] = useState<Record<string, unknown>[] | null>(null);
   const [reconstructionMetadata, setReconstructionMetadata] = useState<Record<string, unknown> | null>(null);
 
+  const isHoloptycho = item ? isHoloptychoRun(item.path, item.structureFamily) : false;
+
   useEffect(() => {
     if (!item) return;
 
     // Reset segmentation data when item changes
     setSegmentationTableData(null);
+
+    // Holoptycho runs are rendered by their own viewer — no array discovery needed.
+    if (isHoloptychoRun(item.path, item.structureFamily)) {
+      setArrayPath(null);
+      setArrayShape(null);
+      setReconstructionMetadata(null);
+      setIsDiscovering(false);
+      return;
+    }
 
     if (item.structureFamily === 'array') {
       setArrayPath(item.path);
@@ -337,8 +357,19 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
           <ScrollArea className="flex-1 overflow-hidden">
             <div className="p-5 space-y-5 min-w-0 max-w-full">
 
+              {/* Holoptycho run viewer */}
+              {isHoloptycho && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1 }}
+                >
+                  <HoloptychoViewer path={item.path} metadata={item.metadata} />
+                </motion.div>
+              )}
+
               {/* Image Viewer */}
-              {(hasViewableArray || isDiscovering) && (
+              {!isHoloptycho && (hasViewableArray || isDiscovering) && (
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}

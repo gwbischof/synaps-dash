@@ -146,6 +146,7 @@ export async function listChildren(
     if (p.includes('/raw')) return '-scan_id';
     if (p.includes('/reconstructions')) return '-metadata.scan_id';
     if (p.includes('/segmentations')) return '-id';
+    if (p.endsWith('/holoptycho')) return '-metadata.started_at';
     return '-_';
   };
   const { offset = 0, limit = 20, sort = getDefaultSort(path), fullText, filters } = options;

@@ -17,10 +17,14 @@ interface UseTiledThumbnailOptions {
   findReconstructionByScanId?: string;
   // If true, discover array in BlueskyRun structure (primary/data/{detector})
   discoverBlueskyRun?: boolean;
+  // If true, resolve to live/object then final/object (holoptycho run containers)
+  discoverHoloptycho?: boolean;
+  // Cache-bust counter — increment to force a refetch (skip cached blob)
+  version?: number;
 }
 
 export function useTiledThumbnail(path: string | null, options: UseTiledThumbnailOptions = {}) {
-  const { subpath, discoverArray = false, findReconstructionByScanId: scanIdToFind, discoverBlueskyRun = false } = options;
+  const { subpath, discoverArray = false, findReconstructionByScanId: scanIdToFind, discoverBlueskyRun = false, discoverHoloptycho = false, version = 0 } = options;
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -32,7 +36,7 @@ export function useTiledThumbnail(path: string | null, options: UseTiledThumbnai
     }
 
     // Create a cache key based on all options
-    const cacheKey = `${path}|${subpath || ''}|${discoverArray}|${scanIdToFind || ''}`;
+    const cacheKey = `${path}|${subpath || ''}|${discoverArray}|${scanIdToFind || ''}|${discoverHoloptycho}|${version}`;
 
     // Check thumbnail cache first
     const cachedThumbnail = thumbnailCache.get(cacheKey);
@@ -130,6 +134,32 @@ export function useTiledThumbnail(path: string | null, options: UseTiledThumbnai
           }
         }
 
+        // Holoptycho run container: try live/object then final/object.
+        // Don't memoize — live/ may appear after the run starts, and we want
+        // version-based refetches to re-resolve.
+        if (discoverHoloptycho) {
+          const children = await listChildren(path, { limit: 10 });
+          const liveContainer = children.items.find(c => c.id === 'live' && c.structureFamily === 'container');
+          const finalContainer = children.items.find(c => c.id === 'final' && c.structureFamily === 'container');
+          const source = liveContainer || finalContainer;
+          if (!source) {
+            if (!cancelled) {
+              setThumbnailUrl(null);
+              setIsLoading(false);
+            }
+            return;
+          }
+          targetPath = `${source.path}/object`;
+          // Slice the leading mode dim so tiled returns a 2D image.
+          const url = await fetchThumbnail(targetPath, 'viridis', 0);
+          if (!cancelled && url) {
+            thumbnailCache.set(cacheKey, url);
+            setThumbnailUrl(url);
+          }
+          if (!cancelled) setIsLoading(false);
+          return;
+        }
+
         // If discoverBlueskyRun is true, find array in primary/data/{detector}
         if (discoverBlueskyRun) {
           try {
@@ -199,7 +229,7 @@ export function useTiledThumbnail(path: string | null, options: UseTiledThumbnai
       cancelled = true;
       // Don't revoke blob URLs - they're cached and may be reused
     };
-  }, [path, subpath, discoverArray, scanIdToFind, discoverBlueskyRun]);
+  }, [path, subpath, discoverArray, scanIdToFind, discoverBlueskyRun, discoverHoloptycho, version]);
 
   return { thumbnailUrl, isLoading, error };
 }

@@ -7,8 +7,17 @@ export const WEBSOCKETS_ENABLED = true;
 // Use our local WebSocket proxy to avoid browser header limitations
 const USE_PROXY = true;
 
+export interface ItemUpdate {
+  key: string;
+  path: string;
+  structureFamily: 'array' | 'container' | 'table';
+  metadata: Record<string, unknown>;
+  timestamp: string;
+}
+
 export interface WebSocketOptions {
   onMessage: (item: DatasetItem) => void;
+  onItemUpdated?: (update: ItemUpdate) => void;
   onConnect?: () => void;
   onDisconnect?: () => void;
   onError?: (error: Event) => void;
@@ -114,6 +123,14 @@ export class TiledWebSocket {
             isNew: true,
           };
           this.options.onMessage(item);
+        } else if (tiledMsg.type === 'container-child-metadata-updated') {
+          this.options.onItemUpdated?.({
+            key: tiledMsg.key,
+            path: `${this.path}/${tiledMsg.key}`,
+            structureFamily: tiledMsg.structure_family,
+            metadata: tiledMsg.metadata,
+            timestamp: tiledMsg.timestamp,
+          });
         }
       } catch (error) {
         console.error('[WebSocket] Failed to parse message:', error);

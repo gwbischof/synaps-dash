@@ -88,9 +88,20 @@ const TYPE_CONFIG: Record<string, { icon: typeof Layers; label: string; color: s
   array: { icon: Grid3X3, label: 'ARR', color: 'text-cell' },
   table: { icon: Table, label: 'TBL', color: 'text-data' },
   BlueskyRun: { icon: Database, label: 'RUN', color: 'text-nebula' },
+  holoptycho: { icon: Activity, label: 'HOLO', color: 'text-nova' },
 };
 
-function getTypeConfig(structureFamily: string, specs?: string[]) {
+function isHoloptychoRun(path: string, structureFamily: string): boolean {
+  if (structureFamily !== 'container') return false;
+  // hxn/processed/holoptycho/{run_uid} — exactly one segment after holoptycho/
+  const idx = path.indexOf('hxn/processed/holoptycho/');
+  if (idx === -1) return false;
+  const tail = path.slice(idx + 'hxn/processed/holoptycho/'.length);
+  return tail.length > 0 && !tail.includes('/');
+}
+
+function getTypeConfig(structureFamily: string, specs?: string[], path?: string) {
+  if (path && isHoloptychoRun(path, structureFamily)) return TYPE_CONFIG.holoptycho;
   if (specs?.includes('BlueskyRun')) return TYPE_CONFIG.BlueskyRun;
   return TYPE_CONFIG[structureFamily] || TYPE_CONFIG.array;
 }
@@ -107,12 +118,17 @@ function getThumbnailConfig(
   subpath?: string;
   discoverArray?: boolean;
   discoverBlueskyRun?: boolean;
+  discoverHoloptycho?: boolean;
   findReconstructionByScanId?: string;
 } {
   // BlueskyRun items: skip thumbnails (tiled server can't render eiger2_image data)
   // The discovery works but tiled returns 500 errors accessing detector data
   if (specs?.includes('BlueskyRun')) {
     return { skip: true };
+  }
+  // Holoptycho run containers: live/object → final/object
+  if (isHoloptychoRun(path, structureFamily)) {
+    return { skip: false, discoverHoloptycho: true };
   }
   // Reconstructions: use first element if available, otherwise discover
   if (path.includes('synaps/reconstructions')) {
@@ -168,6 +184,7 @@ export function DatasetCard({ item, onClick }: DatasetCardProps) {
       discoverArray: thumbnailConfig.discoverArray,
       findReconstructionByScanId: thumbnailConfig.findReconstructionByScanId,
       discoverBlueskyRun: thumbnailConfig.discoverBlueskyRun,
+      discoverHoloptycho: thumbnailConfig.discoverHoloptycho,
     }
   );
 
@@ -183,7 +200,7 @@ export function DatasetCard({ item, onClick }: DatasetCardProps) {
 
   const groupCount = metadata.groups ? Object.keys(metadata.groups).length : 0;
   const timestamp = findTimestamp(metadata, item.timeCreated);
-  const typeConfig = getTypeConfig(item.structureFamily, item.specs);
+  const typeConfig = getTypeConfig(item.structureFamily, item.specs, item.path);
   const TypeIcon = typeConfig.icon;
 
   return (

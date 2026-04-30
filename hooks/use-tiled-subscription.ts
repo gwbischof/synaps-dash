@@ -2,12 +2,13 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { DatasetItem } from '@/lib/tiled/types';
-import { TiledWebSocket, createTiledWebSocket, WEBSOCKETS_ENABLED } from '@/lib/tiled/websocket';
+import { TiledWebSocket, createTiledWebSocket, WEBSOCKETS_ENABLED, ItemUpdate } from '@/lib/tiled/websocket';
 
 interface UseTiledSubscriptionOptions {
   enabled?: boolean;
   includeHistory?: boolean;
   pollingInterval?: number; // ms, used as fallback
+  onItemUpdated?: (update: ItemUpdate) => void;
 }
 
 interface UseTiledSubscriptionReturn {
@@ -21,22 +22,26 @@ export function useTiledSubscription(
   onNewItem: (item: DatasetItem) => void,
   options: UseTiledSubscriptionOptions = {}
 ): UseTiledSubscriptionReturn {
-  const { enabled = true, includeHistory = false, pollingInterval = 5000 } = options;
+  const { enabled = true, includeHistory = false, pollingInterval = 5000, onItemUpdated } = options;
   const [isConnected, setIsConnected] = useState(false);
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const [mode, setMode] = useState<'websocket' | 'polling' | 'disconnected'>('disconnected');
 
   const wsRef = useRef<TiledWebSocket | null>(null);
   const onNewItemRef = useRef(onNewItem);
+  const onItemUpdatedRef = useRef(onItemUpdated);
   const knownIdsRef = useRef<Set<string>>(new Set());
   const isFirstPollRef = useRef(true);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const usePollingRef = useRef(false);
 
-  // Keep callback ref updated
+  // Keep callback refs updated
   useEffect(() => {
     onNewItemRef.current = onNewItem;
   }, [onNewItem]);
+  useEffect(() => {
+    onItemUpdatedRef.current = onItemUpdated;
+  }, [onItemUpdated]);
 
   // Polling function
   const startPolling = useCallback(() => {
@@ -106,6 +111,9 @@ export function useTiledSubscription(
     const ws = createTiledWebSocket(path, {
       onMessage: (item) => {
         onNewItemRef.current(item);
+      },
+      onItemUpdated: (update) => {
+        onItemUpdatedRef.current?.(update);
       },
       onConnect: () => {
         console.log('[Subscription] WebSocket connected');
