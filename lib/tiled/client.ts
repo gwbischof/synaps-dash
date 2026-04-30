@@ -316,7 +316,11 @@ export function getArrayFullUrl(path: string, format: string = 'image/png', cmap
   return `${API_BASE}/array/full/${path}?format=${encodeURIComponent(format)}&cmap=${cmap}`;
 }
 
-export async function fetchThumbnail(path: string, cmap: string = 'viridis', slice: number | string = 0): Promise<string | null> {
+export async function fetchThumbnail(
+  path: string,
+  cmap: string = 'viridis',
+  slice: number | string = 0,
+): Promise<string | null> {
   try {
     const authHeader = await getValidAuthHeader();
     const url = getThumbnailUrl(path, cmap, slice);
@@ -331,6 +335,45 @@ export async function fetchThumbnail(path: string, cmap: string = 'viridis', sli
     return URL.createObjectURL(blob);
   } catch {
     return null;
+  }
+}
+
+export type EtagFetchResult =
+  | { status: 'changed'; etag: string | null; blobUrl: string }
+  | { status: 'unchanged'; etag: string | null }
+  | { status: 'error' };
+
+// Fetch a thumbnail using If-None-Match for change detection. When the upstream ETag
+// matches `lastEtag`, the proxy returns 304 and we skip allocating a new blob URL.
+// Used by long-running views that need to detect in-place data overwrites cheaply.
+export async function fetchThumbnailIfChanged(
+  path: string,
+  cmap: string,
+  slice: number | string,
+  lastEtag: string | null,
+): Promise<EtagFetchResult> {
+  try {
+    const authHeader = await getValidAuthHeader();
+    const url = getThumbnailUrl(path, cmap, slice);
+
+    const headers: Record<string, string> = {};
+    if (authHeader) headers['Authorization'] = authHeader;
+    if (lastEtag) headers['If-None-Match'] = lastEtag;
+
+    const response = await fetch(url, { headers });
+
+    if (response.status === 304) {
+      return { status: 'unchanged', etag: lastEtag };
+    }
+    if (!response.ok) {
+      return { status: 'error' };
+    }
+
+    const etag = response.headers.get('ETag');
+    const blob = await response.blob();
+    return { status: 'changed', etag, blobUrl: URL.createObjectURL(blob) };
+  } catch {
+    return { status: 'error' };
   }
 }
 

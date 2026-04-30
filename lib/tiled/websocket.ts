@@ -146,7 +146,9 @@ export class TiledWebSocket {
     };
 
     this.ws.onerror = (error) => {
-      console.error('[WebSocket] Error:', error);
+      // WebSocket errors are recoverable — onclose will fire next and trigger reconnect or fallback to polling.
+      // Use warn (not error) so Next.js dev overlay doesn't treat it as a fatal error.
+      console.warn('[WebSocket] Error:', error);
       this.options.onError?.(error);
     };
   }

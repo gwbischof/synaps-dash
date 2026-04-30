@@ -13,10 +13,14 @@ export async function GET(
     const url = `${TILED_URL}/api/v1/${tiledPath}${searchParams ? `?${searchParams}` : ''}`;
 
     const authHeader = request.headers.get('Authorization');
+    const ifNoneMatch = request.headers.get('If-None-Match');
 
     const headers: HeadersInit = {};
     if (authHeader) {
       headers['Authorization'] = authHeader;
+    }
+    if (ifNoneMatch) {
+      headers['If-None-Match'] = ifNoneMatch;
     }
 
     console.log('[Tiled Proxy] Fetching:', url);
@@ -24,6 +28,14 @@ export async function GET(
 
     // Get the content type to handle different response types
     const contentType = response.headers.get('Content-Type') || '';
+    const etag = response.headers.get('ETag');
+
+    // Pass 304 Not Modified through unmodified — used by ETag-based change detection.
+    if (response.status === 304) {
+      const respHeaders: Record<string, string> = {};
+      if (etag) respHeaders['ETag'] = etag;
+      return new NextResponse(null, { status: 304, headers: respHeaders });
+    }
 
     if (!response.ok) {
       const error = await response.text();
@@ -37,12 +49,14 @@ export async function GET(
     // Handle binary responses (images)
     if (contentType.startsWith('image/')) {
       const buffer = await response.arrayBuffer();
-      return new NextResponse(buffer, {
-        headers: {
-          'Content-Type': contentType,
-          'Cache-Control': 'public, max-age=60',
-        },
-      });
+      const respHeaders: Record<string, string> = {
+        'Content-Type': contentType,
+        // no-cache + must-revalidate forces conditional revalidation on every request
+        // so the client sees fresh data while still benefiting from 304s.
+        'Cache-Control': 'no-cache, must-revalidate',
+      };
+      if (etag) respHeaders['ETag'] = etag;
+      return new NextResponse(buffer, { headers: respHeaders });
     }
 
     // Handle JSON responses

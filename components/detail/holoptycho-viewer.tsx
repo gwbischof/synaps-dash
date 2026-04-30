@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Loader2, Hash, Activity, Wifi, WifiOff } from 'lucide-react';
-import { fetchThumbnail, listChildren, getMetadata } from '@/lib/tiled/client';
+import { Loader2, Hash, Activity } from 'lucide-react';
+import { fetchThumbnailIfChanged, listChildren, getMetadata } from '@/lib/tiled/client';
 import { useTiledSubscription } from '@/hooks/use-tiled-subscription';
 
 interface HoloptychoViewerProps {
@@ -18,7 +18,8 @@ interface SourceInfo {
   hasVit: boolean;
 }
 
-// Polling interval used when WebSocket isn't available. Matches the reference viewer (~1s).
+// Tiles poll on this cadence using If-None-Match. Most polls return 304 (cheap, ~1KB
+// of headers) — only when the upstream array's bytes change does the full PNG transfer.
 const POLL_INTERVAL_MS = 2000;
 
 async function discoverSources(runPath: string): Promise<SourceInfo> {
@@ -35,52 +36,74 @@ async function discoverSources(runPath: string): Promise<SourceInfo> {
 interface TiledImageTileProps {
   title: string;
   subtitle?: string;
-  // Path to the array
   path: string;
   // Slice expression passed to tiled — e.g. 0 for (mode, H, W) or "0,1" for (B, C, H, W)
   slice: number | string;
-  // Cache-bust counter to force refetch on live updates
-  version: number;
-  // Optional cmap parameter (tiled may ignore for complex arrays)
   cmap?: string;
+  // Polling cadence — set to 0/undefined to disable polling (e.g. for `final/` arrays
+  // that never change after a run completes).
+  pollIntervalMs?: number;
+  // Called whenever a fresh image is loaded (i.e. ETag changed). Lets the parent
+  // update timestamps and metadata-derived state.
+  onChanged?: () => void;
 }
 
-function TiledImageTile({ title, subtitle, path, slice, version, cmap = 'viridis' }: TiledImageTileProps) {
+function TiledImageTile({
+  title,
+  subtitle,
+  path,
+  slice,
+  cmap = 'viridis',
+  pollIntervalMs,
+  onChanged,
+}: TiledImageTileProps) {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const previousUrlRef = useRef<string | null>(null);
+  const onChangedRef = useRef(onChanged);
+
+  useEffect(() => {
+    onChangedRef.current = onChanged;
+  }, [onChanged]);
 
   useEffect(() => {
     let cancelled = false;
-    setIsLoading(true);
-    setError(null);
+    let etag: string | null = null;
+    let inflight = false;
 
-    fetchThumbnail(path, cmap, slice)
-      .then(url => {
-        if (cancelled) {
-          if (url) URL.revokeObjectURL(url);
-          return;
-        }
-        if (!url) {
-          setError('Failed to load');
-          setIsLoading(false);
-          return;
-        }
-        // Revoke the previous blob URL on successful refresh.
+    const tick = async () => {
+      if (cancelled || inflight) return;
+      inflight = true;
+      const result = await fetchThumbnailIfChanged(path, cmap, slice, etag);
+      inflight = false;
+      if (cancelled) {
+        if (result.status === 'changed') URL.revokeObjectURL(result.blobUrl);
+        return;
+      }
+      if (result.status === 'changed') {
+        etag = result.etag;
         if (previousUrlRef.current) URL.revokeObjectURL(previousUrlRef.current);
-        previousUrlRef.current = url;
-        setImageUrl(url);
-        setIsLoading(false);
-      })
-      .catch(err => {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : 'Failed to load');
-        setIsLoading(false);
-      });
+        previousUrlRef.current = result.blobUrl;
+        setImageUrl(result.blobUrl);
+        setHasLoadedOnce(true);
+        setError(null);
+        onChangedRef.current?.();
+      } else if (result.status === 'error' && !etag) {
+        // Only surface errors before we've ever loaded; transient errors during polling
+        // shouldn't replace a perfectly good last frame.
+        setError('Failed to load');
+        setHasLoadedOnce(true);
+      }
+    };
 
-    return () => { cancelled = true; };
-  }, [path, slice, version, cmap]);
+    tick();
+    if (!pollIntervalMs) {
+      return () => { cancelled = true; };
+    }
+    const handle = setInterval(tick, pollIntervalMs);
+    return () => { cancelled = true; clearInterval(handle); };
+  }, [path, slice, cmap, pollIntervalMs]);
 
   // Revoke on unmount
   useEffect(() => {
@@ -97,22 +120,17 @@ function TiledImageTile({ title, subtitle, path, slice, version, cmap = 'viridis
       </div>
       <div className="relative aspect-square rounded-lg overflow-hidden bg-surface-raised border border-border-subtle">
         {imageUrl ? (
-          // Keep the previous frame visible while a new one is fetching to avoid flicker.
+          // eslint-disable-next-line @next/next/no-img-element
           <img src={imageUrl} alt={title} className="w-full h-full object-contain" />
         ) : null}
-        {!imageUrl && !isLoading && !error && (
-          <div className="absolute inset-0 flex items-center justify-center text-text-tertiary text-xs">
-            no data yet
+        {!hasLoadedOnce && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Loader2 className="w-5 h-5 text-beam animate-spin" />
           </div>
         )}
         {error && !imageUrl && (
           <div className="absolute inset-0 flex items-center justify-center text-text-tertiary text-xs">
             {error}
-          </div>
-        )}
-        {isLoading && !imageUrl && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <Loader2 className="w-5 h-5 text-beam animate-spin" />
           </div>
         )}
       </div>
@@ -125,9 +143,14 @@ export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
   const [isDiscovering, setIsDiscovering] = useState(true);
   const [iteration, setIteration] = useState<number | null>(null);
   const [vitBatchNum, setVitBatchNum] = useState<number | null>(null);
-  // Bumped every time we see an update for live/object|probe — forces tiles to refetch.
-  const [iterativeVersion, setIterativeVersion] = useState(0);
-  const [vitVersion, setVitVersion] = useState(0);
+  // Wall-clock time of the most recent refresh — drives the "updated Xs ago" indicator.
+  const [lastUpdateAt, setLastUpdateAt] = useState<number | null>(null);
+  // Forces the relative-time string to recompute every second so the indicator ticks up.
+  const [, setNowTick] = useState(0);
+  useEffect(() => {
+    const handle = setInterval(() => setNowTick(t => t + 1), 1000);
+    return () => clearInterval(handle);
+  }, []);
 
   const containerMeta = metadata as { scan_id?: number | string; recon_mode?: string; run_uid?: string } | undefined;
 
@@ -143,108 +166,40 @@ export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
     return () => { cancelled = true; };
   }, [path]);
 
-  // Read iteration / batch_num from array metadata so the footer reflects current state.
-  // Refreshed on each version bump — that's how live updates surface in tiled.
-  useEffect(() => {
-    if (!sources.iterativeSource) return;
-    let cancelled = false;
-    getMetadata(`${path}/${sources.iterativeSource}/object`)
-      .then(m => {
-        if (cancelled) return;
-        const it = (m as { iteration?: number }).iteration;
-        if (typeof it === 'number') setIteration(it);
-      })
-      .catch(() => { /* ignore */ });
-    return () => { cancelled = true; };
-  }, [path, sources.iterativeSource, iterativeVersion]);
-
-  useEffect(() => {
-    if (!sources.hasVit) return;
-    let cancelled = false;
-    getMetadata(`${path}/vit/pred_latest`)
-      .then(m => {
-        if (cancelled) return;
-        const b = (m as { batch_num?: number }).batch_num;
-        if (typeof b === 'number') setVitBatchNum(b);
-      })
-      .catch(() => { /* ignore */ });
-    return () => { cancelled = true; };
-  }, [path, sources.hasVit, vitVersion]);
-
   // WebSocket subscription on the run container picks up newly-created sub-containers
   // (e.g. live/ appears partway through a run). We re-run discovery on creation.
   const handleNewItem = useCallback(() => {
     discoverSources(path).then(setSources);
   }, [path]);
+  useTiledSubscription(path, handleNewItem, { enabled: true });
 
-  const { mode: runMode } = useTiledSubscription(path, handleNewItem, { enabled: true });
-
-  // Subscriptions on each sub-container — listen for metadata-updated events
-  // when probe/object/pred_latest get rewritten in place.
-  const handleLiveUpdate = useCallback((update: { key: string }) => {
-    if (update.key === 'object' || update.key === 'probe') {
-      setIterativeVersion(v => v + 1);
-    }
-  }, []);
-  const handleFinalUpdate = useCallback((update: { key: string }) => {
-    if (update.key === 'object' || update.key === 'probe') {
-      setIterativeVersion(v => v + 1);
-    }
-  }, []);
-  const handleVitUpdate = useCallback((update: { key: string }) => {
-    if (update.key === 'pred_latest') {
-      setVitVersion(v => v + 1);
-    }
-  }, []);
-
-  const livePath = sources.iterativeSource === 'live' ? `${path}/live` : '';
-  const finalPath = sources.iterativeSource === 'final' ? `${path}/final` : '';
-  const vitPath = sources.hasVit ? `${path}/vit` : '';
-
-  const { mode: liveMode } = useTiledSubscription(
-    livePath,
-    () => { /* no-op: we care about updates */ },
-    { enabled: !!livePath, onItemUpdated: handleLiveUpdate }
-  );
-  useTiledSubscription(
-    finalPath,
-    () => { /* no-op */ },
-    { enabled: !!finalPath, onItemUpdated: handleFinalUpdate }
-  );
-  useTiledSubscription(
-    vitPath,
-    () => { /* no-op */ },
-    { enabled: !!vitPath, onItemUpdated: handleVitUpdate }
-  );
-
-  // Polling fallback: if WS for the live sub-container can't deliver metadata-updated events,
-  // poll the array's iteration field. Only active when iterative source is `live` (final/ never changes).
-  useEffect(() => {
-    if (sources.iterativeSource !== 'live') return;
-    let cancelled = false;
-    let lastIteration = iteration;
-    const tick = async () => {
-      try {
-        const m = await getMetadata(`${path}/live/object`);
+  // Each tile's onChanged fires when it loads a fresh image (ETag changed). We use it
+  // to refresh the iteration/batch_num counters and stamp the "updated Xs ago" footer.
+  const handleObjectChanged = useCallback(() => {
+    setLastUpdateAt(Date.now());
+    if (!sources.iterativeSource) return;
+    getMetadata(`${path}/${sources.iterativeSource}/object`)
+      .then(m => {
         const it = (m as { iteration?: number }).iteration;
-        if (typeof it === 'number' && it !== lastIteration) {
-          lastIteration = it;
-          if (!cancelled) {
-            setIteration(it);
-            setIterativeVersion(v => v + 1);
-          }
-        }
-      } catch { /* ignore */ }
-    };
-    const handle = setInterval(tick, POLL_INTERVAL_MS);
-    return () => { cancelled = true; clearInterval(handle); };
-    // We deliberately omit `iteration` from deps — the closure tracks lastIteration locally.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        if (typeof it === 'number') setIteration(it);
+      })
+      .catch(() => { /* ignore */ });
   }, [path, sources.iterativeSource]);
 
-  const objectPath = sources.iterativeSource ? `${path}/${sources.iterativeSource}/object` : '';
-  const probePath = sources.iterativeSource ? `${path}/${sources.iterativeSource}/probe` : '';
-  const vitPredPath = sources.hasVit ? `${path}/vit/pred_latest` : '';
+  const handleProbeChanged = useCallback(() => {
+    setLastUpdateAt(Date.now());
+  }, []);
+
+  const handleVitChanged = useCallback(() => {
+    setLastUpdateAt(Date.now());
+    if (!sources.hasVit) return;
+    getMetadata(`${path}/vit/pred_latest`)
+      .then(m => {
+        const b = (m as { batch_num?: number }).batch_num;
+        if (typeof b === 'number') setVitBatchNum(b);
+      })
+      .catch(() => { /* ignore */ });
+  }, [path, sources.hasVit]);
 
   if (isDiscovering) {
     return (
@@ -262,8 +217,23 @@ export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
     );
   }
 
-  // Live indicator: WS active on the live sub-container means we'll get pushed updates.
-  const isStreaming = liveMode === 'websocket' && sources.iterativeSource === 'live';
+  const objectPath = sources.iterativeSource ? `${path}/${sources.iterativeSource}/object` : '';
+  const probePath = sources.iterativeSource ? `${path}/${sources.iterativeSource}/probe` : '';
+  const vitPredPath = sources.hasVit ? `${path}/vit/pred_latest` : '';
+
+  // `final/` arrays don't change after the run completes — no polling needed.
+  const iterativePollMs = sources.iterativeSource === 'live' ? POLL_INTERVAL_MS : 0;
+
+  // Format last-update time as a short relative string for the footer.
+  const formatRelative = (ts: number | null): string => {
+    if (ts === null) return '—';
+    const dt = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+    if (dt < 1) return 'just now';
+    if (dt < 60) return `${dt}s ago`;
+    const m = Math.floor(dt / 60);
+    if (m < 60) return `${m}m ago`;
+    return `${Math.floor(m / 60)}h ago`;
+  };
 
   return (
     <div className="space-y-3">
@@ -274,7 +244,8 @@ export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
             subtitle={iteration !== null ? `iter ${iteration}` : undefined}
             path={objectPath}
             slice={0}
-            version={iterativeVersion}
+            pollIntervalMs={iterativePollMs}
+            onChanged={handleObjectChanged}
           />
         )}
         {vitPredPath && (
@@ -283,8 +254,9 @@ export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
             subtitle={vitBatchNum !== null ? `batch ${vitBatchNum}` : undefined}
             path={vitPredPath}
             slice="0,1"
-            version={vitVersion}
             cmap="twilight"
+            pollIntervalMs={POLL_INTERVAL_MS}
+            onChanged={handleVitChanged}
           />
         )}
         {probePath && (
@@ -292,7 +264,8 @@ export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
             title="Probe |·|"
             path={probePath}
             slice={0}
-            version={iterativeVersion}
+            pollIntervalMs={iterativePollMs}
+            onChanged={handleProbeChanged}
           />
         )}
       </div>
@@ -310,21 +283,14 @@ export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
             {containerMeta.recon_mode}
           </span>
         )}
-        <span className="ml-auto flex items-center gap-1 text-text-tertiary" title={`run subscription: ${runMode}`}>
-          {isStreaming ? (
-            <>
-              <Wifi className="w-3 h-3 text-live" />
-              <span>live</span>
-            </>
-          ) : sources.iterativeSource === 'live' ? (
-            <>
-              <WifiOff className="w-3 h-3" />
-              <span>polling</span>
-            </>
-          ) : (
-            <span>{sources.iterativeSource === 'final' ? 'final' : ''}</span>
-          )}
-        </span>
+        {sources.iterativeSource === 'live' && (
+          <span className="ml-auto text-text-tertiary">
+            updated {formatRelative(lastUpdateAt)}
+          </span>
+        )}
+        {sources.iterativeSource === 'final' && (
+          <span className="ml-auto text-text-tertiary">final</span>
+        )}
       </div>
     </div>
   );
