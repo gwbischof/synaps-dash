@@ -8,6 +8,7 @@ import {
   getMetadata,
   fetchFloat32Array,
   fetchInt32Array,
+  fetchFloat64Array,
 } from '@/lib/tiled/client';
 import { useTiledSubscription } from '@/hooks/use-tiled-subscription';
 import { IncrementalStitcher, mosaicToImageData } from '@/lib/stitcher';
@@ -158,15 +159,18 @@ interface ScanGridMetadata {
   x_pixel_m?: number;
 }
 
-function extractScanGrid(metadata?: Record<string, unknown>): {
-  xNum: number;
-  yNum: number;
-  xRangeUm: number;
-  yRangeUm: number;
-  xDirection: number;
-  yDirection: number;
+interface ScanBounds {
+  // Total number of frames the scan will produce.
+  nFrames: number;
   pixelSizeM: number;
-} | null {
+  // Canvas extent in meters, derived from x_range_um × x_direction etc.
+  xMinM: number;
+  xMaxM: number;
+  yMinM: number;
+  yMaxM: number;
+}
+
+function extractScanBounds(metadata?: Record<string, unknown>): ScanBounds | null {
   if (!metadata) return null;
   const m = metadata as ScanGridMetadata;
   if (
@@ -179,14 +183,21 @@ function extractScanGrid(metadata?: Record<string, unknown>): {
   ) {
     return null;
   }
+  const xDir = typeof m.x_direction === 'number' ? m.x_direction : -1;
+  const yDir = typeof m.y_direction === 'number' ? m.y_direction : -1;
+  // Scan goes from 0 → x_range_um × direction. Take min/max of the endpoints
+  // so the canvas covers the full extent regardless of direction sign.
+  const xLoUm = Math.min(0, m.x_range_um * xDir);
+  const xHiUm = Math.max(0, m.x_range_um * xDir);
+  const yLoUm = Math.min(0, m.y_range_um * yDir);
+  const yHiUm = Math.max(0, m.y_range_um * yDir);
   return {
-    xNum: m.x_num,
-    yNum: m.y_num,
-    xRangeUm: m.x_range_um,
-    yRangeUm: m.y_range_um,
-    xDirection: typeof m.x_direction === 'number' ? m.x_direction : -1,
-    yDirection: typeof m.y_direction === 'number' ? m.y_direction : 1,
+    nFrames: m.x_num * m.y_num,
     pixelSizeM: m.x_pixel_m,
+    xMinM: xLoUm * 1e-6,
+    xMaxM: xHiUm * 1e-6,
+    yMinM: yLoUm * 1e-6,
+    yMaxM: yHiUm * 1e-6,
   };
 }
 
@@ -215,17 +226,19 @@ function StitchedVitTile({ runPath, metadata, live, onChanged }: StitchedVitTile
     onChangedRef.current = onChanged;
   }, [onChanged]);
 
-  // Construct the stitcher once we have the scan-grid metadata. This is keyed
-  // on runPath so a different run resets state.
+  // Reset stitcher state whenever we switch runs. We can't construct the
+  // stitcher yet — it needs the per-frame positions array, which the polling
+  // tick fetches on first run. This effect just clears state from a previous
+  // run.
   useEffect(() => {
-    const grid = extractScanGrid(metadata);
-    if (!grid) {
+    const bounds = extractScanBounds(metadata);
+    if (!bounds) {
       stitcherRef.current = null;
       processedRef.current = new Set();
       setError('Run is missing scan-grid metadata; can\'t stitch.');
       return;
     }
-    stitcherRef.current = new IncrementalStitcher(grid);
+    stitcherRef.current = null;
     processedRef.current = new Set();
     inflightRef.current = new Set();
     setBatchesProcessed(0);
@@ -273,17 +286,60 @@ function StitchedVitTile({ runPath, metadata, live, onChanged }: StitchedVitTile
     }
   }, [renderMosaic]);
 
-  // Initial load: list all existing batches and ingest. Subsequent polls
-  // pick up new batches the WebSocket missed (e.g. when WS isn't available).
+  // Initial load + live polling: refresh positions, list all existing
+  // batches, ingest any we haven't seen yet. Constructs the stitcher on the
+  // first tick once positions_um is available.
   const batchesPath = `${runPath}/vit/batches`;
+  const positionsPath = `${runPath}/positions_um`;
   useEffect(() => {
-    if (!stitcherRef.current) return;
+    const bounds = extractScanBounds(metadata);
+    if (!bounds) return;
     let cancelled = false;
     const tick = async () => {
       try {
-        const result = await listChildren(batchesPath, { limit: 1000, sort: 'id' });
+        // Always refresh positions so newly-arrived frames have real
+        // positions before their batch lands. Stitcher carries NaNs over
+        // until the PandA stream catches up.
+        let positionsUm: Float64Array | null = null;
+        try {
+          const fetched = await fetchFloat64Array(positionsPath);
+          positionsUm = fetched.data;
+        } catch {
+          // positions_um doesn't exist yet on this run (the pipeline writes
+          // it on the first ViT batch). Nothing to do until a batch lands.
+          return;
+        }
         if (cancelled) return;
-        for (const item of result.items) {
+        if (!stitcherRef.current) {
+          stitcherRef.current = new IncrementalStitcher({
+            positionsUm,
+            pixelSizeM: bounds.pixelSizeM,
+            xMinM: bounds.xMinM,
+            xMaxM: bounds.xMaxM,
+            yMinM: bounds.yMinM,
+            yMaxM: bounds.yMaxM,
+          });
+        } else {
+          stitcherRef.current.updatePositions(positionsUm);
+        }
+
+        // Empty sort overrides listChildren's default '-_', which the
+        // synaps_project container spec rejects with 422 for batch containers.
+        // Sort client-side instead — keys are zero-padded ('000000', '000001'…)
+        // so lexical ordering matches numeric. Paginate because tiled caps
+        // page[limit] at 300.
+        const all = [];
+        let offset = 0;
+        while (true) {
+          const result = await listChildren(batchesPath, { limit: 300, offset, sort: '' });
+          if (cancelled) return;
+          all.push(...result.items);
+          if (!result.hasMore) break;
+          offset += result.items.length;
+          if (result.items.length === 0) break;
+        }
+        const items = all.sort((a, b) => a.id.localeCompare(b.id));
+        for (const item of items) {
           if (cancelled) return;
           await ingestBatch(item.path, item.id);
         }
@@ -295,7 +351,7 @@ function StitchedVitTile({ runPath, metadata, live, onChanged }: StitchedVitTile
     if (!live) return () => { cancelled = true; };
     const handle = setInterval(tick, POLL_INTERVAL_MS);
     return () => { cancelled = true; clearInterval(handle); };
-  }, [batchesPath, ingestBatch, live]);
+  }, [batchesPath, positionsPath, metadata, ingestBatch, live]);
 
   // Live updates: WebSocket fires when a new batch container appears.
   const handleNewBatch = useCallback((item: { id: string; path: string }) => {

@@ -5,22 +5,23 @@
 // to remove edge artifacts, then bilinearly interpolated onto a global
 // meter-scale canvas. Overlapping regions are averaged.
 //
-// The original Python implementation pulls real positions out of the scan
-// H5 file. We're running in the dashboard with no H5 access, so positions
-// are reconstructed deterministically from the scan-grid metadata
-// (x_num/y_num, x_range_um/y_range_um, x_direction/y_direction). This is
-// exactly what ptycho_holo.py uses for `simulate_positions` — for live
-// scans the real PandA positions deviate by motor jitter (nm scale), which
-// is below visible resolution at the mosaic level.
+// Positions are passed in explicitly (in microns) — typically read from
+// `<run>/positions_um` written by holoptycho's PointProcessorOp. NaN entries
+// mean "frame not yet seen by the PandA stream" and are skipped during
+// addBatch. live_compare_viewer.py loaded the same kind of array out of the
+// scan H5 file (`f["points"]`).
 
 export interface StitcherConfig {
-  xNum: number;
-  yNum: number;
-  xRangeUm: number;
-  yRangeUm: number;
-  xDirection: number;
-  yDirection: number;
+  // Per-frame positions in microns; shape (n_frames, 2) flattened row-major
+  // i.e. [x0, y0, x1, y1, …]. NaN rows are treated as "not yet known".
+  positionsUm: Float64Array;
   pixelSizeM: number;
+  // Canvas bounds in meters. Allocated upfront from scan-grid metadata so
+  // late-arriving positions land within the canvas without re-stitching.
+  xMinM: number;
+  xMaxM: number;
+  yMinM: number;
+  yMaxM: number;
   // Number of border pixels to discard from each patch before placement,
   // matches live_compare_viewer.py default.
   innerCrop?: number;
@@ -41,19 +42,17 @@ export class IncrementalStitcher {
   private readonly innerCrop: number;
   private readonly padM: number;
 
-  private xGrid0 = 0;
-  private yGrid0 = 0;
-  private gridW = 0;
-  private gridH = 0;
-  private mosaic: Float32Array | null = null;
-  private counts: Uint32Array | null = null;
-  private initialized = false;
-  private patchSize = 0;
+  private readonly xGrid0: number;
+  private readonly yGrid0: number;
+  private readonly gridW: number;
+  private readonly gridH: number;
+  private mosaic: Float32Array;
+  private counts: Uint32Array;
 
   constructor(config: StitcherConfig) {
     const {
-      xNum, yNum, xRangeUm, yRangeUm,
-      xDirection, yDirection, pixelSizeM,
+      positionsUm, pixelSizeM,
+      xMinM, xMaxM, yMinM, yMaxM,
       innerCrop = 32, padM = 0.5e-6,
     } = config;
 
@@ -61,43 +60,42 @@ export class IncrementalStitcher {
     this.innerCrop = innerCrop;
     this.padM = padM;
 
-    // Reproduce ptycho_holo.py's simulate_positions ordering:
-    //   pos[i*xNum + j] = (j*dx*xDir, i*dy*yDir), dx = xRange/xNum (microns).
-    const total = xNum * yNum;
+    // positionsUm is shape (n_frames, 2) — row-major [x0, y0, x1, y1, …]
+    // in microns. Convert to meters and split into separate axis arrays so
+    // the inner loop is a single indexed read.
+    if (positionsUm.length % 2 !== 0) {
+      throw new Error(
+        `positionsUm length must be even, got ${positionsUm.length}`,
+      );
+    }
+    const total = positionsUm.length / 2;
     this.posX = new Float64Array(total);
     this.posY = new Float64Array(total);
-    const dxUm = xNum > 0 ? xRangeUm / xNum : 0;
-    const dyUm = yNum > 0 ? yRangeUm / yNum : 0;
-    for (let i = 0; i < yNum; i++) {
-      for (let j = 0; j < xNum; j++) {
-        const k = i * xNum + j;
-        this.posX[k] = j * dxUm * xDirection * 1e-6;
-        this.posY[k] = i * dyUm * yDirection * 1e-6;
-      }
-    }
-  }
-
-  private initFromPatchSize(patchSize: number): void {
-    const ps = this.pixelSizeM;
-    this.patchSize = patchSize;
-
-    let xMin = Infinity, xMax = -Infinity;
-    let yMin = Infinity, yMax = -Infinity;
-    for (let k = 0; k < this.posX.length; k++) {
-      if (this.posX[k] < xMin) xMin = this.posX[k];
-      if (this.posX[k] > xMax) xMax = this.posX[k];
-      if (this.posY[k] < yMin) yMin = this.posY[k];
-      if (this.posY[k] > yMax) yMax = this.posY[k];
+    for (let k = 0; k < total; k++) {
+      this.posX[k] = positionsUm[k * 2] * 1e-6;
+      this.posY[k] = positionsUm[k * 2 + 1] * 1e-6;
     }
 
-    this.xGrid0 = xMin - this.padM;
-    this.yGrid0 = yMin - this.padM;
-    this.gridW = Math.max(1, Math.ceil((xMax + this.padM - this.xGrid0) / ps));
-    this.gridH = Math.max(1, Math.ceil((yMax + this.padM - this.yGrid0) / ps));
-
+    // Canvas bounds derived from the configured scan extent — independent of
+    // which positions have been published yet, so a freshly-allocated stitcher
+    // can ingest batches even if their positions arrive later.
+    this.xGrid0 = xMinM - padM;
+    this.yGrid0 = yMinM - padM;
+    this.gridW = Math.max(1, Math.ceil((xMaxM + padM - this.xGrid0) / pixelSizeM));
+    this.gridH = Math.max(1, Math.ceil((yMaxM + padM - this.yGrid0) / pixelSizeM));
     this.mosaic = new Float32Array(this.gridW * this.gridH);
     this.counts = new Uint32Array(this.gridW * this.gridH);
-    this.initialized = true;
+  }
+
+  // Replace the per-frame positions array, e.g. when fresh data is fetched
+  // from `<run>/positions_um` partway through a live run. Canvas dimensions
+  // are unchanged.
+  updatePositions(positionsUm: Float64Array): void {
+    if (positionsUm.length !== this.posX.length * 2) return;
+    for (let k = 0; k < this.posX.length; k++) {
+      this.posX[k] = positionsUm[k * 2] * 1e-6;
+      this.posY[k] = positionsUm[k * 2 + 1] * 1e-6;
+    }
   }
 
   // Stitch a batch into the mosaic. `pred` is a flattened [B, C, H, W]
@@ -110,7 +108,6 @@ export class IncrementalStitcher {
       return;
     }
     const [B, C, H, W] = shape;
-    if (!this.initialized) this.initFromPatchSize(H);
 
     const ps = this.pixelSizeM;
     const crop = this.innerCrop;
@@ -124,18 +121,22 @@ export class IncrementalStitcher {
     // Phase channel = 1 when present (amplitude=0). Fall back to chan 0 for
     // single-channel predictions.
     const phaseChan = C >= 2 ? 1 : 0;
-    const mosaic = this.mosaic!;
-    const counts = this.counts!;
+    const mosaic = this.mosaic;
+    const counts = this.counts;
     const gridW = this.gridW;
     const gridH = this.gridH;
 
     for (let b = 0; b < B; b++) {
       const idx = indices[b];
       if (idx < 0 || idx >= this.posX.length) continue;
+      const px = this.posX[idx];
+      const py = this.posY[idx];
+      // Skip frames whose positions haven't been published yet (NaN).
+      if (!Number.isFinite(px) || !Number.isFinite(py)) continue;
 
       // Cropped patch corner positions in meters.
-      const xLocal0 = this.posX[idx] + (crop - (H - 1) / 2) * ps;
-      const yLocal0 = this.posY[idx] + (crop - (H - 1) / 2) * ps;
+      const xLocal0 = px + (crop - (H - 1) / 2) * ps;
+      const yLocal0 = py + (crop - (H - 1) / 2) * ps;
       const xLocalEnd = xLocal0 + (Wc - 1) * ps;
       const yLocalEnd = yLocal0 + (Hc - 1) * ps;
 
@@ -197,8 +198,7 @@ export class IncrementalStitcher {
 
   // Produce mosaic / counts. Returns null until at least one batch has been
   // stitched.
-  getMosaic(): MosaicView | null {
-    if (!this.mosaic || !this.counts) return null;
+  getMosaic(): MosaicView {
     const out = new Float32Array(this.mosaic.length);
     const m = this.mosaic;
     const c = this.counts;
@@ -206,10 +206,6 @@ export class IncrementalStitcher {
       out[i] = c[i] > 0 ? m[i] / c[i] : 0;
     }
     return { data: out, width: this.gridW, height: this.gridH };
-  }
-
-  get patchSizeReady(): boolean {
-    return this.initialized;
   }
 }
 

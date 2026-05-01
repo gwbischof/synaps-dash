@@ -476,6 +476,13 @@ export async function fetchInt32Array(
   return { data: new Int32Array(buffer), shape };
 }
 
+export async function fetchFloat64Array(
+  path: string,
+): Promise<{ data: Float64Array; shape: number[] }> {
+  const { buffer, shape } = await fetchArrayBuffer(path);
+  return { data: new Float64Array(buffer), shape };
+}
+
 // Fetch table data from tiled as JSON (converts columnar to row format)
 export async function fetchTableData(path: string): Promise<Record<string, unknown>[]> {
   const url = `${API_BASE}/table/full/${path}?format=application/json`;
