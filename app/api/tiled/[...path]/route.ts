@@ -46,19 +46,6 @@ export async function GET(
       );
     }
 
-    // Handle binary responses (images)
-    if (contentType.startsWith('image/')) {
-      const buffer = await response.arrayBuffer();
-      const respHeaders: Record<string, string> = {
-        'Content-Type': contentType,
-        // no-cache + must-revalidate forces conditional revalidation on every request
-        // so the client sees fresh data while still benefiting from 304s.
-        'Cache-Control': 'no-cache, must-revalidate',
-      };
-      if (etag) respHeaders['ETag'] = etag;
-      return new NextResponse(buffer, { headers: respHeaders });
-    }
-
     // Handle JSON responses
     if (contentType.includes('application/json')) {
       const data = await response.json();
@@ -75,13 +62,18 @@ export async function GET(
       });
     }
 
-    // Default: return as text
-    const text = await response.text();
-    return new NextResponse(text, {
-      headers: {
-        'Content-Type': contentType,
-      },
-    });
+    // Default: pass through as binary. Covers images, application/octet-stream,
+    // application/x-numpy, etc. Text-encoded responses are handled above; anything
+    // else is opaque bytes that must not be re-encoded as a string.
+    const buffer = await response.arrayBuffer();
+    const respHeaders: Record<string, string> = {
+      'Content-Type': contentType,
+      // no-cache + must-revalidate forces conditional revalidation on every request
+      // so the client sees fresh data while still benefiting from 304s.
+      'Cache-Control': 'no-cache, must-revalidate',
+    };
+    if (etag) respHeaders['ETag'] = etag;
+    return new NextResponse(buffer, { headers: respHeaders });
   } catch (error) {
     console.error('[Tiled Proxy] Error:', error instanceof Error ? error.message : error);
     return NextResponse.json(

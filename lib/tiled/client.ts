@@ -434,6 +434,48 @@ export async function fetchArrayData(path: string): Promise<number[][]> {
   return response.json();
 }
 
+// Fetch a tiled array as raw little-endian bytes plus its shape.
+// Caller wraps `buffer` in the appropriate TypedArray (Float32Array,
+// Int32Array, …); we don't infer dtype because callers already know what
+// they're reading. Used by viewers that need the raw values rather than a
+// server-rendered PNG (e.g. the ViT mosaic stitcher).
+export async function fetchArrayBuffer(
+  path: string,
+): Promise<{ buffer: ArrayBuffer; shape: number[] }> {
+  const metaUrl = `${API_BASE}/metadata/${path}`;
+  const dataUrl = `${API_BASE}/array/full/${path}?format=application/octet-stream`;
+  const [metaResp, dataResp] = await Promise.all([
+    fetchWithAuth(metaUrl),
+    fetchWithAuth(dataUrl),
+  ]);
+  if (!metaResp.ok) {
+    throw new Error(`Failed to fetch array metadata: ${metaResp.status}`);
+  }
+  if (!dataResp.ok) {
+    throw new Error(`Failed to fetch array bytes: ${dataResp.status}`);
+  }
+  const meta = await metaResp.json();
+  const attrs = meta?.attributes ?? meta?.data?.attributes;
+  const shape: number[] = attrs?.structure?.shape ?? [];
+  const buffer = await dataResp.arrayBuffer();
+  return { buffer, shape };
+}
+
+// Convenience wrappers for the common dtypes we read.
+export async function fetchFloat32Array(
+  path: string,
+): Promise<{ data: Float32Array; shape: number[] }> {
+  const { buffer, shape } = await fetchArrayBuffer(path);
+  return { data: new Float32Array(buffer), shape };
+}
+
+export async function fetchInt32Array(
+  path: string,
+): Promise<{ data: Int32Array; shape: number[] }> {
+  const { buffer, shape } = await fetchArrayBuffer(path);
+  return { data: new Int32Array(buffer), shape };
+}
+
 // Fetch table data from tiled as JSON (converts columnar to row format)
 export async function fetchTableData(path: string): Promise<Record<string, unknown>[]> {
   const url = `${API_BASE}/table/full/${path}?format=application/json`;
