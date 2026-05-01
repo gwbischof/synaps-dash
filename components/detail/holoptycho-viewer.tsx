@@ -6,12 +6,8 @@ import {
   fetchThumbnailIfChanged,
   listChildren,
   getMetadata,
-  fetchFloat32Array,
-  fetchInt32Array,
-  fetchFloat64Array,
 } from '@/lib/tiled/client';
 import { useTiledSubscription } from '@/hooks/use-tiled-subscription';
-import { IncrementalStitcher, mosaicToImageData } from '@/lib/stitcher';
 
 interface HoloptychoViewerProps {
   // Path to the run container, e.g. hxn/processed/holoptycho/{run_uid}
@@ -146,266 +142,6 @@ function TiledImageTile({
   );
 }
 
-// Run-level metadata fields needed to stitch ViT predictions into a global
-// mosaic. ptycho_holo.py writes these onto the run container so the
-// dashboard can reproduce the scan-grid positions deterministically.
-interface ScanGridMetadata {
-  x_num?: number;
-  y_num?: number;
-  x_range_um?: number;
-  y_range_um?: number;
-  x_direction?: number;
-  y_direction?: number;
-  x_pixel_m?: number;
-}
-
-// Compute canvas bounds from the actual positions in microns. Returns null
-// if no finite positions are present yet. We derive bounds from observed
-// positions rather than the configured x_range_um / y_range_um because in
-// practice fly-scan motor positions extend several microns past the nominal
-// scan range (overshoot, settling, angle).
-function computeBoundsM(positionsUm: Float64Array): {
-  xMinM: number; xMaxM: number; yMinM: number; yMaxM: number;
-} | null {
-  let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
-  for (let k = 0; k < positionsUm.length; k += 2) {
-    const x = positionsUm[k], y = positionsUm[k + 1];
-    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-    if (x < xMin) xMin = x;
-    if (x > xMax) xMax = x;
-    if (y < yMin) yMin = y;
-    if (y > yMax) yMax = y;
-  }
-  if (!Number.isFinite(xMin) || !Number.isFinite(yMin)) return null;
-  return {
-    xMinM: xMin * 1e-6,
-    xMaxM: xMax * 1e-6,
-    yMinM: yMin * 1e-6,
-    yMaxM: yMax * 1e-6,
-  };
-}
-
-function pixelSizeFromMetadata(metadata?: Record<string, unknown>): number | null {
-  if (!metadata) return null;
-  const m = metadata as ScanGridMetadata;
-  if (typeof m.x_pixel_m !== 'number' || m.x_pixel_m <= 0) return null;
-  return m.x_pixel_m;
-}
-
-interface StitchedVitTileProps {
-  // Path to the run container.
-  runPath: string;
-  // Run-level metadata (must include scan-grid fields).
-  metadata?: Record<string, unknown>;
-  // Whether new batches are still expected. Set false on completed runs to
-  // skip the polling fallback path.
-  live: boolean;
-  onChanged?: () => void;
-}
-
-function StitchedVitTile({ runPath, metadata, live, onChanged }: StitchedVitTileProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const stitcherRef = useRef<IncrementalStitcher | null>(null);
-  const processedRef = useRef<Set<string>>(new Set());
-  const inflightRef = useRef<Set<string>>(new Set());
-  const onChangedRef = useRef(onChanged);
-  const [batchesProcessed, setBatchesProcessed] = useState(0);
-  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    onChangedRef.current = onChanged;
-  }, [onChanged]);
-
-  // Track the canvas bounds the current stitcher was built with, so we can
-  // tell when newly-arrived positions extend past the canvas and we need to
-  // rebuild.
-  const boundsRef = useRef<{ xMinM: number; xMaxM: number; yMinM: number; yMaxM: number } | null>(null);
-
-  // Reset stitcher state whenever we switch runs.
-  useEffect(() => {
-    const ps = pixelSizeFromMetadata(metadata);
-    if (!ps) {
-      stitcherRef.current = null;
-      processedRef.current = new Set();
-      boundsRef.current = null;
-      setError('Run is missing scan-grid metadata; can\'t stitch.');
-      return;
-    }
-    stitcherRef.current = null;
-    processedRef.current = new Set();
-    inflightRef.current = new Set();
-    boundsRef.current = null;
-    setBatchesProcessed(0);
-    setHasLoadedOnce(false);
-    setError(null);
-  }, [runPath, metadata]);
-
-  const renderMosaic = useCallback(() => {
-    const stitcher = stitcherRef.current;
-    const canvas = canvasRef.current;
-    if (!stitcher || !canvas) return;
-    const mosaic = stitcher.getMosaic();
-    if (!mosaic) return;
-    if (canvas.width !== mosaic.width || canvas.height !== mosaic.height) {
-      canvas.width = mosaic.width;
-      canvas.height = mosaic.height;
-    }
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.putImageData(mosaicToImageData(mosaic), 0, 0);
-    setHasLoadedOnce(true);
-    onChangedRef.current?.();
-  }, []);
-
-  // Fetch any batch we haven't seen yet. Safe to call concurrently — we
-  // dedupe via processedRef + inflightRef.
-  const ingestBatch = useCallback(async (batchPath: string, batchId: string) => {
-    if (processedRef.current.has(batchId) || inflightRef.current.has(batchId)) return;
-    if (!stitcherRef.current) return;
-    inflightRef.current.add(batchId);
-    try {
-      const [{ data: pred, shape }, { data: indices }] = await Promise.all([
-        fetchFloat32Array(`${batchPath}/pred`),
-        fetchInt32Array(`${batchPath}/indices`),
-      ]);
-      if (!stitcherRef.current) return;
-      stitcherRef.current.addBatch(pred, indices, shape);
-      processedRef.current.add(batchId);
-      setBatchesProcessed(processedRef.current.size);
-      renderMosaic();
-    } catch {
-      // Transient — caller will retry on next poll.
-    } finally {
-      inflightRef.current.delete(batchId);
-    }
-  }, [renderMosaic]);
-
-  // Initial load + live polling: refresh positions, list all existing
-  // batches, ingest any we haven't seen yet. Constructs the stitcher on the
-  // first tick once positions_um is available.
-  const batchesPath = `${runPath}/vit/batches`;
-  const positionsPath = `${runPath}/positions_um`;
-  useEffect(() => {
-    const pixelSizeM = pixelSizeFromMetadata(metadata);
-    if (!pixelSizeM) return;
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        // Always refresh positions so newly-arrived frames have real
-        // positions before their batch lands. Stitcher carries NaNs over
-        // until the PandA stream catches up.
-        let positionsUm: Float64Array | null = null;
-        try {
-          const fetched = await fetchFloat64Array(positionsPath);
-          positionsUm = fetched.data;
-        } catch {
-          // positions_um doesn't exist yet on this run (the pipeline writes
-          // it on the first ViT batch). Nothing to do until a batch lands.
-          return;
-        }
-        if (cancelled) return;
-        const observed = computeBoundsM(positionsUm);
-        if (!observed) return; // no finite positions yet
-        // Pad observed bounds so newly-arriving rows of a snake/raster scan
-        // don't immediately push us past the canvas.
-        const margin = 0.5e-6;
-        const wantedBounds = {
-          xMinM: observed.xMinM - margin,
-          xMaxM: observed.xMaxM + margin,
-          yMinM: observed.yMinM - margin,
-          yMaxM: observed.yMaxM + margin,
-        };
-        const cur = boundsRef.current;
-        const existing = stitcherRef.current;
-        const needsRebuild = !existing
-          || !cur
-          || wantedBounds.xMinM < cur.xMinM
-          || wantedBounds.xMaxM > cur.xMaxM
-          || wantedBounds.yMinM < cur.yMinM
-          || wantedBounds.yMaxM > cur.yMaxM;
-        if (needsRebuild) {
-          stitcherRef.current = new IncrementalStitcher({
-            positionsUm,
-            pixelSizeM,
-            ...wantedBounds,
-          });
-          boundsRef.current = wantedBounds;
-          // Force re-ingest of every batch so the new (larger) canvas gets
-          // populated with all batches we've already seen.
-          processedRef.current = new Set();
-          setBatchesProcessed(0);
-        } else {
-          existing.updatePositions(positionsUm);
-        }
-
-        // Empty sort overrides listChildren's default '-_', which the
-        // synaps_project container spec rejects with 422 for batch containers.
-        // Sort client-side instead — keys are zero-padded ('000000', '000001'…)
-        // so lexical ordering matches numeric. Paginate because tiled caps
-        // page[limit] at 300.
-        const all = [];
-        let offset = 0;
-        while (true) {
-          const result = await listChildren(batchesPath, { limit: 300, offset, sort: '' });
-          if (cancelled) return;
-          all.push(...result.items);
-          if (!result.hasMore) break;
-          offset += result.items.length;
-          if (result.items.length === 0) break;
-        }
-        const items = all.sort((a, b) => a.id.localeCompare(b.id));
-        for (const item of items) {
-          if (cancelled) return;
-          await ingestBatch(item.path, item.id);
-        }
-      } catch {
-        // Transient
-      }
-    };
-    tick();
-    if (!live) return () => { cancelled = true; };
-    const handle = setInterval(tick, POLL_INTERVAL_MS);
-    return () => { cancelled = true; clearInterval(handle); };
-  }, [batchesPath, positionsPath, metadata, ingestBatch, live]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Live updates: WebSocket fires when a new batch container appears.
-  const handleNewBatch = useCallback((item: { id: string; path: string }) => {
-    void ingestBatch(item.path, item.id);
-  }, [ingestBatch]);
-  useTiledSubscription(batchesPath, handleNewBatch, { enabled: live });
-
-  return (
-    <div className="flex flex-col">
-      <div className="flex items-baseline justify-between mb-1.5">
-        <span className="text-[11px] uppercase tracking-wider text-text-tertiary font-medium">
-          ViT mosaic (phase)
-        </span>
-        <span className="text-[10px] text-text-tertiary font-mono">
-          {batchesProcessed > 0 ? `${batchesProcessed} batch${batchesProcessed === 1 ? '' : 'es'}` : ''}
-        </span>
-      </div>
-      <div className="relative aspect-square rounded-lg overflow-hidden bg-surface-raised border border-border-subtle">
-        <canvas
-          ref={canvasRef}
-          className="w-full h-full object-contain"
-          style={{ imageRendering: 'pixelated' }}
-        />
-        {!hasLoadedOnce && !error && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <Loader2 className="w-5 h-5 text-beam animate-spin" />
-          </div>
-        )}
-        {error && !hasLoadedOnce && (
-          <div className="absolute inset-0 flex items-center justify-center px-3 text-center text-text-tertiary text-xs">
-            {error}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
   const [sources, setSources] = useState<SourceInfo>({ iterativeSource: null, hasVit: false });
   const [isDiscovering, setIsDiscovering] = useState(true);
@@ -482,9 +218,11 @@ export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
 
   // `final/` arrays don't change after the run completes — no polling needed.
   const iterativePollMs = sources.iterativeSource === 'live' ? POLL_INTERVAL_MS : 0;
-  // Treat ViT as live whenever the iterative side is live, or whenever the run
-  // is ViT-only (no iterative source at all).
-  const vitLive = sources.iterativeSource === 'live' || !sources.iterativeSource;
+  // ViT is live whenever the iterative side is live, or whenever the run is
+  // ViT-only (no iterative source at all).
+  const vitPollMs = (sources.iterativeSource === 'live' || !sources.iterativeSource)
+    ? POLL_INTERVAL_MS
+    : 0;
 
   // Format last-update time as a short relative string for the footer.
   const formatRelative = (ts: number | null): string => {
@@ -511,10 +249,11 @@ export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
           />
         )}
         {sources.hasVit && (
-          <StitchedVitTile
-            runPath={path}
-            metadata={metadata}
-            live={vitLive}
+          <TiledImageTile
+            title="ViT mosaic (phase)"
+            path={`${path}/vit/mosaic`}
+            slice=":,:"
+            pollIntervalMs={vitPollMs}
             onChanged={handleVitChanged}
           />
         )}
