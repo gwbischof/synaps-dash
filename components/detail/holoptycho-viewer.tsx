@@ -225,6 +225,7 @@ export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
   const [sources, setSources] = useState<SourceInfo>({ iterativeSource: null, hasVit: false });
   const [isDiscovering, setIsDiscovering] = useState(true);
   const [iteration, setIteration] = useState<number | null>(null);
+  const [vitBatch, setVitBatch] = useState<number | null>(null);
   // Wall-clock time of the most recent refresh — drives the "updated Xs ago" indicator.
   const [lastUpdateAt, setLastUpdateAt] = useState<number | null>(null);
   // Forces the relative-time string to recompute every second so the indicator ticks up.
@@ -240,6 +241,8 @@ export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
   useEffect(() => {
     let cancelled = false;
     setIsDiscovering(true);
+    setIteration(null);
+    setVitBatch(null);
     discoverSources(path).then(result => {
       if (cancelled) return;
       setSources(result);
@@ -274,7 +277,13 @@ export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
 
   const handleVitChanged = useCallback(() => {
     setLastUpdateAt(Date.now());
-  }, []);
+    getMetadata(`${path}/vit/mosaic`)
+      .then(m => {
+        const b = (m as { batch_num?: number }).batch_num;
+        if (typeof b === 'number') setVitBatch(b);
+      })
+      .catch(() => { /* ignore */ });
+  }, [path]);
 
   if (isDiscovering) {
     return (
@@ -330,6 +339,7 @@ export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
         {sources.hasVit && (
           <TiledImageTile
             title="ViT mosaic (phase)"
+            subtitle={vitBatch !== null ? `batch ${vitBatch}` : undefined}
             path={`${path}/vit/mosaic`}
             slice=":,:"
             cmap="magma"
