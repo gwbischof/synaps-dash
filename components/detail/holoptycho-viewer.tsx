@@ -159,46 +159,37 @@ interface ScanGridMetadata {
   x_pixel_m?: number;
 }
 
-interface ScanBounds {
-  // Total number of frames the scan will produce.
-  nFrames: number;
-  pixelSizeM: number;
-  // Canvas extent in meters, derived from x_range_um × x_direction etc.
-  xMinM: number;
-  xMaxM: number;
-  yMinM: number;
-  yMaxM: number;
+// Compute canvas bounds from the actual positions in microns. Returns null
+// if no finite positions are present yet. We derive bounds from observed
+// positions rather than the configured x_range_um / y_range_um because in
+// practice fly-scan motor positions extend several microns past the nominal
+// scan range (overshoot, settling, angle).
+function computeBoundsM(positionsUm: Float64Array): {
+  xMinM: number; xMaxM: number; yMinM: number; yMaxM: number;
+} | null {
+  let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+  for (let k = 0; k < positionsUm.length; k += 2) {
+    const x = positionsUm[k], y = positionsUm[k + 1];
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    if (x < xMin) xMin = x;
+    if (x > xMax) xMax = x;
+    if (y < yMin) yMin = y;
+    if (y > yMax) yMax = y;
+  }
+  if (!Number.isFinite(xMin) || !Number.isFinite(yMin)) return null;
+  return {
+    xMinM: xMin * 1e-6,
+    xMaxM: xMax * 1e-6,
+    yMinM: yMin * 1e-6,
+    yMaxM: yMax * 1e-6,
+  };
 }
 
-function extractScanBounds(metadata?: Record<string, unknown>): ScanBounds | null {
+function pixelSizeFromMetadata(metadata?: Record<string, unknown>): number | null {
   if (!metadata) return null;
   const m = metadata as ScanGridMetadata;
-  if (
-    typeof m.x_num !== 'number' ||
-    typeof m.y_num !== 'number' ||
-    typeof m.x_range_um !== 'number' ||
-    typeof m.y_range_um !== 'number' ||
-    typeof m.x_pixel_m !== 'number' ||
-    m.x_pixel_m <= 0
-  ) {
-    return null;
-  }
-  const xDir = typeof m.x_direction === 'number' ? m.x_direction : -1;
-  const yDir = typeof m.y_direction === 'number' ? m.y_direction : -1;
-  // Scan goes from 0 → x_range_um × direction. Take min/max of the endpoints
-  // so the canvas covers the full extent regardless of direction sign.
-  const xLoUm = Math.min(0, m.x_range_um * xDir);
-  const xHiUm = Math.max(0, m.x_range_um * xDir);
-  const yLoUm = Math.min(0, m.y_range_um * yDir);
-  const yHiUm = Math.max(0, m.y_range_um * yDir);
-  return {
-    nFrames: m.x_num * m.y_num,
-    pixelSizeM: m.x_pixel_m,
-    xMinM: xLoUm * 1e-6,
-    xMaxM: xHiUm * 1e-6,
-    yMinM: yLoUm * 1e-6,
-    yMaxM: yHiUm * 1e-6,
-  };
+  if (typeof m.x_pixel_m !== 'number' || m.x_pixel_m <= 0) return null;
+  return m.x_pixel_m;
 }
 
 interface StitchedVitTileProps {
@@ -226,21 +217,25 @@ function StitchedVitTile({ runPath, metadata, live, onChanged }: StitchedVitTile
     onChangedRef.current = onChanged;
   }, [onChanged]);
 
-  // Reset stitcher state whenever we switch runs. We can't construct the
-  // stitcher yet — it needs the per-frame positions array, which the polling
-  // tick fetches on first run. This effect just clears state from a previous
-  // run.
+  // Track the canvas bounds the current stitcher was built with, so we can
+  // tell when newly-arrived positions extend past the canvas and we need to
+  // rebuild.
+  const boundsRef = useRef<{ xMinM: number; xMaxM: number; yMinM: number; yMaxM: number } | null>(null);
+
+  // Reset stitcher state whenever we switch runs.
   useEffect(() => {
-    const bounds = extractScanBounds(metadata);
-    if (!bounds) {
+    const ps = pixelSizeFromMetadata(metadata);
+    if (!ps) {
       stitcherRef.current = null;
       processedRef.current = new Set();
+      boundsRef.current = null;
       setError('Run is missing scan-grid metadata; can\'t stitch.');
       return;
     }
     stitcherRef.current = null;
     processedRef.current = new Set();
     inflightRef.current = new Set();
+    boundsRef.current = null;
     setBatchesProcessed(0);
     setHasLoadedOnce(false);
     setError(null);
@@ -292,8 +287,8 @@ function StitchedVitTile({ runPath, metadata, live, onChanged }: StitchedVitTile
   const batchesPath = `${runPath}/vit/batches`;
   const positionsPath = `${runPath}/positions_um`;
   useEffect(() => {
-    const bounds = extractScanBounds(metadata);
-    if (!bounds) return;
+    const pixelSizeM = pixelSizeFromMetadata(metadata);
+    if (!pixelSizeM) return;
     let cancelled = false;
     const tick = async () => {
       try {
@@ -310,17 +305,38 @@ function StitchedVitTile({ runPath, metadata, live, onChanged }: StitchedVitTile
           return;
         }
         if (cancelled) return;
-        if (!stitcherRef.current) {
+        const observed = computeBoundsM(positionsUm);
+        if (!observed) return; // no finite positions yet
+        // Pad observed bounds so newly-arriving rows of a snake/raster scan
+        // don't immediately push us past the canvas.
+        const margin = 0.5e-6;
+        const wantedBounds = {
+          xMinM: observed.xMinM - margin,
+          xMaxM: observed.xMaxM + margin,
+          yMinM: observed.yMinM - margin,
+          yMaxM: observed.yMaxM + margin,
+        };
+        const cur = boundsRef.current;
+        const existing = stitcherRef.current;
+        const needsRebuild = !existing
+          || !cur
+          || wantedBounds.xMinM < cur.xMinM
+          || wantedBounds.xMaxM > cur.xMaxM
+          || wantedBounds.yMinM < cur.yMinM
+          || wantedBounds.yMaxM > cur.yMaxM;
+        if (needsRebuild) {
           stitcherRef.current = new IncrementalStitcher({
             positionsUm,
-            pixelSizeM: bounds.pixelSizeM,
-            xMinM: bounds.xMinM,
-            xMaxM: bounds.xMaxM,
-            yMinM: bounds.yMinM,
-            yMaxM: bounds.yMaxM,
+            pixelSizeM,
+            ...wantedBounds,
           });
+          boundsRef.current = wantedBounds;
+          // Force re-ingest of every batch so the new (larger) canvas gets
+          // populated with all batches we've already seen.
+          processedRef.current = new Set();
+          setBatchesProcessed(0);
         } else {
-          stitcherRef.current.updatePositions(positionsUm);
+          existing.updatePositions(positionsUm);
         }
 
         // Empty sort overrides listChildren's default '-_', which the
@@ -351,7 +367,7 @@ function StitchedVitTile({ runPath, metadata, live, onChanged }: StitchedVitTile
     if (!live) return () => { cancelled = true; };
     const handle = setInterval(tick, POLL_INTERVAL_MS);
     return () => { cancelled = true; clearInterval(handle); };
-  }, [batchesPath, positionsPath, metadata, ingestBatch, live]);
+  }, [batchesPath, positionsPath, metadata, ingestBatch, live]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Live updates: WebSocket fires when a new batch container appears.
   const handleNewBatch = useCallback((item: { id: string; path: string }) => {
