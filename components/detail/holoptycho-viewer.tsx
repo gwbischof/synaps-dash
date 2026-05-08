@@ -35,16 +35,17 @@ const POLL_INTERVAL_MS = 2000;
 // little-endian on the wire (Tiled's default, and matches every machine we
 // run on); returns null if the dtype isn't one we can render.
 //
-// uint16 support is here so the detector-frame intensity tile (written by
-// holoptycho when fine_tune=true) can be rendered alongside the float-typed
-// reconstruction tiles.
+// uint8 / uint16 support is here so the detector-frame amplitude tile
+// (written by holoptycho when fine_tune=true) can be rendered alongside the
+// float-typed reconstruction tiles.
 function decodeFloatBuffer(
   buffer: ArrayBuffer,
   dtype: { kind: string; itemsize: number },
-): Float32Array | Float64Array | Uint16Array | null {
+): Float32Array | Float64Array | Uint16Array | Uint8Array | null {
   if (dtype.kind === 'f' && dtype.itemsize === 4) return new Float32Array(buffer);
   if (dtype.kind === 'f' && dtype.itemsize === 8) return new Float64Array(buffer);
   if (dtype.kind === 'u' && dtype.itemsize === 2) return new Uint16Array(buffer);
+  if (dtype.kind === 'u' && dtype.itemsize === 1) return new Uint8Array(buffer);
   return null;
 }
 
@@ -127,11 +128,11 @@ function TiledImageTile({
         }
         return false;
       }
-      // Floats (live/final reconstructions) and uint16 (detector-frame
-      // intensity) are the dtypes we know how to colormap.
+      // Floats (live/final reconstructions) and uint8 / uint16 (detector
+      // amplitude) are the dtypes we know how to colormap.
       const dtypeOk =
         info.dtype.kind === 'f' ||
-        (info.dtype.kind === 'u' && info.dtype.itemsize === 2);
+        (info.dtype.kind === 'u' && (info.dtype.itemsize === 1 || info.dtype.itemsize === 2));
       if (!dtypeOk) {
         if (!cancelled) {
           setError(`Unsupported dtype: ${info.dtype.kind}${info.dtype.itemsize}`);

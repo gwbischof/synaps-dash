@@ -50,7 +50,7 @@ export const VIRIDIS_LUT: [number, number, number][] = [
 // signature handles both so callers don't have to fork on dtype.
 export function paintFloatArrayToCanvas(
   canvas: HTMLCanvasElement,
-  data: Float32Array | Float64Array | Uint16Array,
+  data: Float32Array | Float64Array | Uint16Array | Uint8Array,
   width: number,
   height: number,
 ): void {
