@@ -24,6 +24,9 @@ interface SourceInfo {
   iterativeSource: 'live' | 'final' | null;
   // Whether vit/pred_latest is available.
   hasVit: boolean;
+  // Whether <run>/diffraction/dp exists (always-on for runs created by
+  // current holoptycho, absent on older runs).
+  hasDiffraction: boolean;
 }
 
 // Tiles poll on this cadence using If-None-Match. Most polls return 304 (cheap,
@@ -65,9 +68,13 @@ async function discoverSources(runPath: string): Promise<SourceInfo> {
     const children = await listChildren(runPath, { limit: 10 });
     const ids = new Set(children.items.map(c => c.id));
     const iterativeSource = ids.has('live') ? 'live' : ids.has('final') ? 'final' : null;
-    return { iterativeSource, hasVit: ids.has('vit') };
+    return {
+      iterativeSource,
+      hasVit: ids.has('vit'),
+      hasDiffraction: ids.has('diffraction'),
+    };
   } catch {
-    return { iterativeSource: null, hasVit: false };
+    return { iterativeSource: null, hasVit: false, hasDiffraction: false };
   }
 }
 
@@ -227,7 +234,7 @@ function TiledImageTile({
 }
 
 export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
-  const [sources, setSources] = useState<SourceInfo>({ iterativeSource: null, hasVit: false });
+  const [sources, setSources] = useState<SourceInfo>({ iterativeSource: null, hasVit: false, hasDiffraction: false });
   const [isDiscovering, setIsDiscovering] = useState(true);
   const [iteration, setIteration] = useState<number | null>(null);
   const [vitBatch, setVitBatch] = useState<number | null>(null);
@@ -240,15 +247,15 @@ export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
     return () => clearInterval(handle);
   }, []);
 
-  const containerMeta = metadata as { scan_id?: number | string; recon_mode?: string; run_uid?: string; fine_tune?: boolean } | undefined;
-  const isFineTune = containerMeta?.fine_tune === true;
+  const containerMeta = metadata as { scan_id?: number | string; recon_mode?: string; run_uid?: string } | undefined;
 
   // Track the most recent filled index in <run>/positions_um — used as the
-  // slice index for the latest detector-frame tile. Only polls when this is
-  // a fine-tuning run (the dp buffer is only present in that case).
+  // slice index for the detector-frame tile. Only polls when this run has
+  // a diffraction subtree (every run created by current holoptycho does;
+  // older runs may not).
   const latestFrameIdx = useLatestFilledIndex(
-    isFineTune ? path : '',
-    isFineTune ? POLL_INTERVAL_MS : 0,
+    sources.hasDiffraction ? path : '',
+    sources.hasDiffraction ? POLL_INTERVAL_MS : 0,
   );
   const handleFrameChanged = useCallback(() => {
     setLastUpdateAt(Date.now());
@@ -379,7 +386,7 @@ export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
             onChanged={handleProbeChanged}
           />
         )}
-        {isFineTune && latestFrameIdx !== null && displayFrameIdx !== null && (
+        {sources.hasDiffraction && latestFrameIdx !== null && displayFrameIdx !== null && (
           <div className="flex flex-col">
             <TiledImageTile
               title="Detector frame"
