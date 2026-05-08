@@ -11,6 +11,7 @@ import {
 } from '@/lib/tiled/client';
 import { paintFloatArrayToCanvas } from '@/lib/tiled/colormap';
 import { useTiledSubscription } from '@/hooks/use-tiled-subscription';
+import { useLatestFilledIndex } from '@/hooks/use-latest-filled-index';
 
 interface HoloptychoViewerProps {
   // Path to the run container, e.g. hxn/processed/holoptycho/{run_uid}
@@ -23,6 +24,9 @@ interface SourceInfo {
   iterativeSource: 'live' | 'final' | null;
   // Whether vit/pred_latest is available.
   hasVit: boolean;
+  // Whether <run>/diffraction/dp exists (always-on for runs created by
+  // current holoptycho, absent on older runs).
+  hasDiffraction: boolean;
 }
 
 // Tiles poll on this cadence using If-None-Match. Most polls return 304 (cheap,
@@ -33,12 +37,18 @@ const POLL_INTERVAL_MS = 2000;
 // Decode raw bytes from Tiled into the right TypedArray for `dtype`. We assume
 // little-endian on the wire (Tiled's default, and matches every machine we
 // run on); returns null if the dtype isn't one we can render.
+//
+// uint8 / uint16 support is here so the detector-frame amplitude tile
+// (written by holoptycho when fine_tune=true) can be rendered alongside the
+// float-typed reconstruction tiles.
 function decodeFloatBuffer(
   buffer: ArrayBuffer,
   dtype: { kind: string; itemsize: number },
-): Float32Array | Float64Array | null {
+): Float32Array | Float64Array | Uint16Array | Uint8Array | null {
   if (dtype.kind === 'f' && dtype.itemsize === 4) return new Float32Array(buffer);
   if (dtype.kind === 'f' && dtype.itemsize === 8) return new Float64Array(buffer);
+  if (dtype.kind === 'u' && dtype.itemsize === 2) return new Uint16Array(buffer);
+  if (dtype.kind === 'u' && dtype.itemsize === 1) return new Uint8Array(buffer);
   return null;
 }
 
@@ -58,9 +68,13 @@ async function discoverSources(runPath: string): Promise<SourceInfo> {
     const children = await listChildren(runPath, { limit: 10 });
     const ids = new Set(children.items.map(c => c.id));
     const iterativeSource = ids.has('live') ? 'live' : ids.has('final') ? 'final' : null;
-    return { iterativeSource, hasVit: ids.has('vit') };
+    return {
+      iterativeSource,
+      hasVit: ids.has('vit'),
+      hasDiffraction: ids.has('diffraction'),
+    };
   } catch {
-    return { iterativeSource: null, hasVit: false };
+    return { iterativeSource: null, hasVit: false, hasDiffraction: false };
   }
 }
 
@@ -121,7 +135,12 @@ function TiledImageTile({
         }
         return false;
       }
-      if (info.dtype.kind !== 'f') {
+      // Floats (live/final reconstructions) and uint8 / uint16 (detector
+      // amplitude) are the dtypes we know how to colormap.
+      const dtypeOk =
+        info.dtype.kind === 'f' ||
+        (info.dtype.kind === 'u' && (info.dtype.itemsize === 1 || info.dtype.itemsize === 2));
+      if (!dtypeOk) {
         if (!cancelled) {
           setError(`Unsupported dtype: ${info.dtype.kind}${info.dtype.itemsize}`);
           setHasLoadedOnce(true);
@@ -215,7 +234,7 @@ function TiledImageTile({
 }
 
 export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
-  const [sources, setSources] = useState<SourceInfo>({ iterativeSource: null, hasVit: false });
+  const [sources, setSources] = useState<SourceInfo>({ iterativeSource: null, hasVit: false, hasDiffraction: false });
   const [isDiscovering, setIsDiscovering] = useState(true);
   const [iteration, setIteration] = useState<number | null>(null);
   const [vitBatch, setVitBatch] = useState<number | null>(null);
@@ -229,6 +248,25 @@ export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
   }, []);
 
   const containerMeta = metadata as { scan_id?: number | string; recon_mode?: string; run_uid?: string } | undefined;
+
+  // Track the most recent filled index in <run>/positions_um — used as the
+  // slice index for the detector-frame tile. Only polls when this run has
+  // a diffraction subtree (every run created by current holoptycho does;
+  // older runs may not).
+  const latestFrameIdx = useLatestFilledIndex(
+    sources.hasDiffraction ? path : '',
+    sources.hasDiffraction ? POLL_INTERVAL_MS : 0,
+  );
+  const handleFrameChanged = useCallback(() => {
+    setLastUpdateAt(Date.now());
+  }, []);
+
+  // Frame slider state. `null` = follow latest (default). Once the user
+  // drags, we lock to that index until they hit "Follow" to resume tracking.
+  const [selectedFrameIdx, setSelectedFrameIdx] = useState<number | null>(null);
+  const displayFrameIdx =
+    selectedFrameIdx !== null ? selectedFrameIdx : latestFrameIdx;
+  const isFollowingLatest = selectedFrameIdx === null;
 
   // Initial discovery: figure out which sub-containers exist on this run.
   useEffect(() => {
@@ -347,6 +385,50 @@ export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
             pollIntervalMs={iterativePollMs}
             onChanged={handleProbeChanged}
           />
+        )}
+        {sources.hasDiffraction && latestFrameIdx !== null && displayFrameIdx !== null && (
+          <div className="flex flex-col">
+            <TiledImageTile
+              title="Detector frame"
+              subtitle={
+                isFollowingLatest
+                  ? `frame ${latestFrameIdx} (latest)`
+                  : `frame ${displayFrameIdx} / ${latestFrameIdx}`
+              }
+              path={`${path}/diffraction/dp`}
+              slice={displayFrameIdx}
+              // Only poll while we're tracking the latest. When the user
+              // has scrubbed to an older frame, that frame doesn't change,
+              // so polling just wastes round-trips.
+              pollIntervalMs={isFollowingLatest ? POLL_INTERVAL_MS : 0}
+              onChanged={handleFrameChanged}
+            />
+            <div className="flex items-center gap-2 mt-2 px-1">
+              <input
+                type="range"
+                min={0}
+                max={latestFrameIdx}
+                step={1}
+                value={displayFrameIdx}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  // Snap-to-latest when the user drags to the rightmost end.
+                  setSelectedFrameIdx(v >= latestFrameIdx ? null : v);
+                }}
+                aria-label="Detector frame index"
+                className="flex-1 accent-beam"
+              />
+              {!isFollowingLatest && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedFrameIdx(null)}
+                  className="text-[10px] uppercase tracking-wider text-beam hover:text-beam-hover px-2 py-0.5 rounded border border-beam/40 hover:bg-beam/10"
+                >
+                  Follow
+                </button>
+              )}
+            </div>
+          </div>
         )}
       </div>
 
