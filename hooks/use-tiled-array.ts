@@ -19,12 +19,16 @@ interface UseTiledThumbnailOptions {
   discoverBlueskyRun?: boolean;
   // If true, resolve to live/object then final/object (holoptycho run containers)
   discoverHoloptycho?: boolean;
+  // If true, prefer a child named `thumbnail` when it exists; otherwise fall
+  // through to other discovery options. Lets producers attach a pre-rendered
+  // 2D preview without changing card logic.
+  tryThumbnailChild?: boolean;
   // Cache-bust counter — increment to force a refetch (skip cached blob)
   version?: number;
 }
 
 export function useTiledThumbnail(path: string | null, options: UseTiledThumbnailOptions = {}) {
-  const { subpath, discoverArray = false, findReconstructionByScanId: scanIdToFind, discoverBlueskyRun = false, discoverHoloptycho = false, version = 0 } = options;
+  const { subpath, discoverArray = false, findReconstructionByScanId: scanIdToFind, discoverBlueskyRun = false, discoverHoloptycho = false, tryThumbnailChild = false, version = 0 } = options;
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -36,7 +40,7 @@ export function useTiledThumbnail(path: string | null, options: UseTiledThumbnai
     }
 
     // Create a cache key based on all options
-    const cacheKey = `${path}|${subpath || ''}|${discoverArray}|${scanIdToFind || ''}|${discoverHoloptycho}|${version}`;
+    const cacheKey = `${path}|${subpath || ''}|${discoverArray}|${scanIdToFind || ''}|${discoverHoloptycho}|${tryThumbnailChild}|${version}`;
 
     // Check thumbnail cache first
     const cachedThumbnail = thumbnailCache.get(cacheKey);
@@ -54,6 +58,33 @@ export function useTiledThumbnail(path: string | null, options: UseTiledThumbnai
 
       try {
         let targetPath = subpath ? `${path}/${subpath}` : path;
+
+        // Prefer a `thumbnail` child if one exists. Cached so repeated card
+        // renders don't re-list. Cache stores the resolved path or null.
+        if (tryThumbnailChild) {
+          const discoverKey = `thumb:${path}`;
+          let resolved: string | null | undefined = discoveredArrayPaths.get(discoverKey);
+          if (resolved === undefined) {
+            try {
+              const children = await listChildren(path, { limit: 50 });
+              const thumb = children.items.find(c => c.id === 'thumbnail');
+              resolved = thumb ? thumb.path : null;
+            } catch {
+              resolved = null;
+            }
+            discoveredArrayPaths.set(discoverKey, resolved);
+          }
+          if (resolved) {
+            const url = await fetchThumbnail(resolved);
+            if (!cancelled && url) {
+              thumbnailCache.set(cacheKey, url);
+              setThumbnailUrl(url);
+            }
+            if (!cancelled) setIsLoading(false);
+            return;
+          }
+          // No thumbnail child — fall through to other discovery options.
+        }
 
         // If scanIdToFind is set, look up corresponding reconstruction
         if (scanIdToFind) {
@@ -229,7 +260,7 @@ export function useTiledThumbnail(path: string | null, options: UseTiledThumbnai
       cancelled = true;
       // Don't revoke blob URLs - they're cached and may be reused
     };
-  }, [path, subpath, discoverArray, scanIdToFind, discoverBlueskyRun, discoverHoloptycho, version]);
+  }, [path, subpath, discoverArray, scanIdToFind, discoverBlueskyRun, discoverHoloptycho, tryThumbnailChild, version]);
 
   return { thumbnailUrl, isLoading, error };
 }

@@ -120,6 +120,7 @@ function getThumbnailConfig(
   discoverBlueskyRun?: boolean;
   discoverHoloptycho?: boolean;
   findReconstructionByScanId?: string;
+  tryThumbnailChild?: boolean;
 } {
   // BlueskyRun items: skip thumbnails (tiled server can't render eiger2_image data)
   // The discovery works but tiled returns 500 errors accessing detector data
@@ -137,13 +138,19 @@ function getThumbnailConfig(
     }
     return { skip: false, discoverArray: true };
   }
-  // Segmentations: show corresponding reconstruction thumbnail (cached after first lookup)
-  if (path.includes('synaps/segmentations')) {
-    const match = item?.id.match(/automap_(\d+)_/);
-    if (match) {
-      return { skip: false, findReconstructionByScanId: match[1] };
+  // Segmentations: prefer a `thumbnail` child if the producer attached one.
+  // Synaps falls back to the matching reconstruction; other beamlines (hxn)
+  // have no fallback so they just show the type icon when no thumbnail exists.
+  if (path.includes('/segmentations/') || path.endsWith('/segmentations')) {
+    if (path.includes('synaps/segmentations')) {
+      const match = item?.id.match(/automap_(\d+)_/);
+      return {
+        skip: false,
+        tryThumbnailChild: true,
+        ...(match ? { findReconstructionByScanId: match[1] } : {}),
+      };
     }
-    return { skip: true };
+    return { skip: false, tryThumbnailChild: true };
   }
   // Arrays can be fetched directly
   if (structureFamily === 'array') {
@@ -185,6 +192,7 @@ export function DatasetCard({ item, onClick }: DatasetCardProps) {
       findReconstructionByScanId: thumbnailConfig.findReconstructionByScanId,
       discoverBlueskyRun: thumbnailConfig.discoverBlueskyRun,
       discoverHoloptycho: thumbnailConfig.discoverHoloptycho,
+      tryThumbnailChild: thumbnailConfig.tryThumbnailChild,
     }
   );
 
