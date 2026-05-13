@@ -247,7 +247,17 @@ export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
     return () => clearInterval(handle);
   }, []);
 
-  const containerMeta = metadata as { scan_id?: number | string; recon_mode?: string; run_uid?: string } | undefined;
+  const containerMeta = metadata as {
+    scan_id?: number | string;
+    recon_mode?: string;
+    run_uid?: string;
+    dp_stride?: number;
+  } | undefined;
+  // Stride between persisted detector frames. 1 = every frame stored;
+  // larger values mean only 1-in-N frames were saved (vit-only runs
+  // default to 1000 to keep WAN writes cheap). The detector tile's
+  // subtitle maps slider row → scan-frame number via this stride.
+  const dpStride = Math.max(1, Number(containerMeta?.dp_stride) || 1);
 
   // Track the most recent filled index in <run>/positions_um — used as the
   // slice index for the detector-frame tile. Only polls when this run has
@@ -387,22 +397,34 @@ export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
           />
         )}
         {sources.hasDiffraction && latestFrameIdx !== null && displayFrameIdx !== null && (
-          <div className="flex flex-col">
-            <TiledImageTile
-              title="Detector frame"
-              subtitle={
-                isFollowingLatest
-                  ? `frame ${latestFrameIdx} (latest)`
-                  : `frame ${displayFrameIdx} / ${latestFrameIdx}`
-              }
-              path={`${path}/diffraction/dp`}
-              slice={displayFrameIdx}
-              // Only poll while we're tracking the latest. When the user
-              // has scrubbed to an older frame, that frame doesn't change,
-              // so polling just wastes round-trips.
-              pollIntervalMs={isFollowingLatest ? POLL_INTERVAL_MS : 0}
-              onChanged={handleFrameChanged}
-            />
+          <div className="flex flex-col col-span-2">
+            <div className="grid grid-cols-2 gap-3">
+              <TiledImageTile
+                title="Detector frame"
+                subtitle={(() => {
+                  const scanFrame = displayFrameIdx * dpStride;
+                  const latestScan = latestFrameIdx * dpStride;
+                  const strideNote = dpStride > 1 ? ` · 1 of every ${dpStride} frames` : '';
+                  return isFollowingLatest
+                    ? `frame ${scanFrame} (latest)${strideNote}`
+                    : `frame ${scanFrame} / ${latestScan}${strideNote}`;
+                })()}
+                path={`${path}/diffraction/dp`}
+                slice={displayFrameIdx}
+                // Only poll while we're tracking the latest. When the user
+                // has scrubbed to an older frame, that frame doesn't change,
+                // so polling just wastes round-trips.
+                pollIntervalMs={isFollowingLatest ? POLL_INTERVAL_MS : 0}
+                onChanged={handleFrameChanged}
+              />
+              <TiledImageTile
+                title="ViT inference (phase)"
+                subtitle={`frame ${displayFrameIdx * dpStride}`}
+                path={`${path}/diffraction/inference`}
+                slice={`${displayFrameIdx},1`}
+                pollIntervalMs={isFollowingLatest ? POLL_INTERVAL_MS : 0}
+              />
+            </div>
             <div className="flex items-center gap-2 mt-2 px-1">
               <input
                 type="range"
